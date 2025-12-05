@@ -22,6 +22,23 @@ struct ParsedUrl {
     bool valid{false};
 };
 
+static bsl::string urlEncode(const bsl::string& in)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    bsl::string out;
+    for (unsigned char c : in) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            out.push_back(static_cast<char>(c));
+        }
+        else {
+            out.push_back('%');
+            out.push_back(hex[(c >> 4) & 0xF]);
+            out.push_back(hex[c & 0xF]);
+        }
+    }
+    return out;
+}
+
 ParsedUrl parseBase(const bsl::string& base)
 {
     ParsedUrl out;
@@ -70,10 +87,31 @@ Response HttpClient::perform(const Command& cmd)
         return r;
     }
 
-    // Build target: /api/{resource}
+    // Build target: /api/{resource} with vhost if required
     bsl::string target = url.target;
     if (target.back() == '/') target.pop_back();
-    target += "/api/" + cmd.resource;
+    auto needsVhost = [&](const bsl::string& res) {
+        return res == "queues" || res == "exchanges" || res == "bindings" ||
+               res == "consumers" || res == "permissions";
+    };
+
+    bsl::string resourcePath = "/api/" + cmd.resource;
+    if (needsVhost(cmd.resource)) {
+        resourcePath += "/" + urlEncode(d_config.vhost);
+    }
+
+    // For show, append name if provided.
+    if (cmd.verb == Verb::Show) {
+        auto it = cmd.params.find("name");
+        if (it == cmd.params.end() || it->second.empty()) {
+            r.statusCode = 400;
+            r.error = "name is required for show";
+            return r;
+        }
+        resourcePath += "/" + urlEncode(it->second);
+    }
+
+    target += resourcePath;
 
     beast::tcp_stream stream(d_io);
     net::ip::tcp::resolver resolver(d_io);
@@ -91,12 +129,31 @@ Response HttpClient::perform(const Command& cmd)
         return r;
     }
 
-    http::request<http::string_body> req{http::verb::get, target, 11};
+    http::verb method = http::verb::get;
+    switch (cmd.verb) {
+        case Verb::List:
+        case Verb::Show:
+            method = http::verb::get;
+            break;
+        case Verb::Delete:
+            method = http::verb::delete_;
+            break;
+        case Verb::Publish:
+        case Verb::Declare:
+        case Verb::Get:
+        default:
+            method = http::verb::get;  // TODO: implement these verbs
+            break;
+    }
+
+    http::request<http::string_body> req{method, target, 11};
     req.set(http::field::host, url.host);
     req.set(http::field::user_agent, "rmqadmin-cpp");
     if (!d_config.username.empty()) {
         bsl::string creds = d_config.username + ":" + d_config.password;
-        bsl::string auth = "Basic " + bsl::string(beast::detail::base64_encode(creds));
+        // Use Beast base64; acceptable here for a client CLI.
+        bsl::string auth =
+            "Basic " + bsl::string(beast::detail::base64_encode(creds));
         req.set(http::field::authorization, auth);
     }
 

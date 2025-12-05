@@ -27,6 +27,13 @@ CliParseResult parseCli(int argc, char** argv)
     app.add_option("-V,--vhost", out.config.vhost, "VHost")->default_val("/");
     app.add_option("--amqp-uri", out.config.amqpUri, "AMQP URI for publish/get via AMQP (optional)");
 
+    // Common parameter helpers
+    bsl::string name;
+    app.add_option("--name", name, "Name (queue/exchange/etc.) for show/delete/declare");
+
+    bsl::vector<bsl::string> kvParams;
+    app.add_option("--param", kvParams, "Extra param key=value pairs")->take_all();
+
     bool useAmqpPublish = false;
     bool useAmqpGet     = false;
     app.add_flag("--amqp-publish", useAmqpPublish, "Use AMQP backend for publish");
@@ -41,6 +48,15 @@ CliParseResult parseCli(int argc, char** argv)
 
     out.command.verb = parseVerb(verbStr);
     out.command.resource = resource;
+    if (!name.empty()) {
+        out.command.params["name"] = name;
+    }
+    for (const auto& kv : kvParams) {
+        auto pos = kv.find('=');
+        if (pos != bsl::string::npos) {
+            out.command.params[kv.substr(0, pos)] = kv.substr(pos + 1);
+        }
+    }
     if ((out.command.verb == Verb::Publish && useAmqpPublish) ||
         (out.command.verb == Verb::Get && useAmqpGet)) {
         out.command.backend = BackendHint::AmqpPreferred;
