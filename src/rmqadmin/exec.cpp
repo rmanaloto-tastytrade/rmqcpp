@@ -1,6 +1,6 @@
 #include "exec.h"
 
-#include "http.h"
+#include "http_client.h"
 #include "amqp.h"
 
 namespace rmqadmin {
@@ -20,7 +20,8 @@ Response Executor::run(const Command& cmd)
         // fall back to HTTP if AMQP fails
     }
 
-    HttpClient client(d_cfg);
+    boost::asio::io_context io;
+    HttpClient client(d_cfg, io);
     return client.perform(cmd);
 }
 

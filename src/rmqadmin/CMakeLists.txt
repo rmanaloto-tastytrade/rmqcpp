@@ -10,6 +10,7 @@ target_link_libraries(rmqadmin_amqp PUBLIC rmqadmin_core rmq)
 
 add_library(rmqadmin_http STATIC http.cpp)
 target_include_directories(rmqadmin_http PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(rmqadmin_http PRIVATE http_client.cpp)
 target_link_libraries(rmqadmin_http PUBLIC rmqadmin_core Boost::beast OpenSSL::SSL OpenSSL::Crypto)
 
 add_library(rmqadmin_cli STATIC cli.cpp)
