@@ -34,6 +34,9 @@ CliParseResult parseCli(int argc, char** argv)
     bsl::vector<bsl::string> kvParams;
     app.add_option("--param", kvParams, "Extra param key=value pairs")->take_all();
 
+    bsl::string payload;
+    app.add_option("--payload", payload, "Payload for publish/get (raw)");
+
     bool useAmqpPublish = false;
     bool useAmqpGet     = false;
     app.add_flag("--amqp-publish", useAmqpPublish, "Use AMQP backend for publish");
@@ -60,6 +63,10 @@ CliParseResult parseCli(int argc, char** argv)
     if ((out.command.verb == Verb::Publish && useAmqpPublish) ||
         (out.command.verb == Verb::Get && useAmqpGet)) {
         out.command.backend = BackendHint::AmqpPreferred;
+    }
+    if ((out.command.verb == Verb::Publish || out.command.verb == Verb::Get) &&
+        !payload.empty()) {
+        out.command.body = payload;
     }
     return out;
 }

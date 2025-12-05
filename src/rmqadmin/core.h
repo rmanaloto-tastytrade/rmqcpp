@@ -25,6 +25,7 @@ struct Command {
     bsl::string resource;              // queues, exchanges, bindings, etc.
     bsl::map<bsl::string, bsl::string> params;
     BackendHint backend{BackendHint::Auto};
+    bsl::string body;  // serialized JSON body if applicable
 };
 
 struct Response {

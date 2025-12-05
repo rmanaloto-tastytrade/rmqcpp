@@ -156,6 +156,11 @@ Response HttpClient::perform(const Command& cmd)
     }
 
     http::request<http::string_body> req{method, target, 11};
+    if (!cmd.body.empty()) {
+        req.body() = cmd.body;
+        req.set(http::field::content_type, "application/json");
+        req.prepare_payload();
+    }
     req.set(http::field::host, url.host);
     req.set(http::field::user_agent, "rmqadmin-cpp");
     if (!d_config.username.empty()) {
