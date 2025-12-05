@@ -4,15 +4,18 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
+#include <boost/beast/ssl.hpp>
 
 #include <bsl_iostream.h>
 #include <bsl_string_view.h>
+#include <cctype>
 
 namespace rmqadmin {
 
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace net = boost::asio;
+namespace ssl = boost::asio::ssl;
 
 namespace {
 struct ParsedUrl {
@@ -35,6 +38,33 @@ static bsl::string urlEncode(const bsl::string& in)
             out.push_back('%');
             out.push_back(hex[(c >> 4) & 0xF]);
             out.push_back(hex[c & 0xF]);
+        }
+    }
+    return out;
+}
+
+static bsl::string jsonEscape(const bsl::string& in)
+{
+    bsl::string out;
+    out.reserve(in.size());
+    for (char c : in) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[7];
+                    snprintf(buf, sizeof buf, "\\u%04x", c & 0xFF);
+                    out += buf;
+                }
+                else {
+                    out.push_back(c);
+                }
         }
     }
     return out;
@@ -98,39 +128,68 @@ Response HttpClient::perform(const Command& cmd)
                res == "consumers" || res == "permissions";
     };
 
-    bsl::string resourcePath = "/api/" + cmd.resource;
-    if (needsVhost(cmd.resource)) {
-        resourcePath += "/" + urlEncode(d_config.vhost);
-    }
-
-    // For show, append name if provided.
-    if (cmd.verb == Verb::Show || cmd.verb == Verb::Delete) {
-        auto it = cmd.params.find("name");
-        if (it == cmd.params.end() || it->second.empty()) {
+    bsl::string resourcePath;
+    // Special cases for publish/get
+    if (cmd.verb == Verb::Publish) {
+        bsl::string exch = "amq.default";
+        if (auto it = cmd.params.find("exchange"); it != cmd.params.end()) exch = it->second;
+        resourcePath = "/api/exchanges/" + urlEncode(d_config.vhost) + "/" + urlEncode(exch) + "/publish";
+        bsl::string routingKey;
+        if (auto it = cmd.params.find("routing_key"); it != cmd.params.end()) routingKey = it->second;
+        bsl::string payload = cmd.body.empty() ? bsl::string() : cmd.body;
+        bsl::string json = "{";
+        json += "\"properties\":{},";
+        json += "\"routing_key\":\"" + jsonEscape(routingKey) + "\",";
+        json += "\"payload\":\"" + jsonEscape(payload) + "\",";
+        json += "\"payload_encoding\":\"string\"";
+        json += "}";
+        reqBody = json;
+    } else if (cmd.verb == Verb::Get) {
+        bsl::string queue;
+        if (auto it = cmd.params.find("queue"); it != cmd.params.end()) queue = it->second;
+        if (queue.empty()) {
             r.statusCode = 400;
-            r.error = "name is required for show/delete";
+            r.error = "queue is required for get";
             return r;
         }
-        resourcePath += "/" + urlEncode(it->second);
+        resourcePath = "/api/queues/" + urlEncode(d_config.vhost) + "/" + urlEncode(queue) + "/get";
+        bsl::string json = "{";
+        json += "\"count\":1,";
+        json += "\"ackmode\":\"ack_requeue_true\",";
+        json += "\"encoding\":\"auto\"";
+        json += "}";
+        reqBody = json;
+    } else {
+        resourcePath = "/api/" + cmd.resource;
+        if (needsVhost(cmd.resource)) {
+            resourcePath += "/" + urlEncode(d_config.vhost);
+        }
+        // For show/delete, append name if provided.
+        if (cmd.verb == Verb::Show || cmd.verb == Verb::Delete || cmd.verb == Verb::Declare) {
+            auto it = cmd.params.find("name");
+            if (it == cmd.params.end() || it->second.empty()) {
+                r.statusCode = 400;
+                r.error = "name is required for show/delete/declare";
+                return r;
+            }
+            resourcePath += "/" + urlEncode(it->second);
+        }
+        if (cmd.verb == Verb::Declare) {
+            // Very minimal declare body for queues/exchanges
+            bsl::string json = "{";
+            json += "\"auto_delete\":false,\"durable\":true,\"arguments\":{}";
+            if (cmd.resource == "exchanges") {
+                auto itType = cmd.params.find("type");
+                if (itType != cmd.params.end()) {
+                    json += ",\"type\":\"" + jsonEscape(itType->second) + "\"";
+                }
+            }
+            json += "}";
+            reqBody = json;
+        }
     }
 
     target += resourcePath;
-
-    beast::tcp_stream stream(d_io);
-    net::ip::tcp::resolver resolver(d_io);
-    beast::error_code ec;
-    auto const results = resolver.resolve(url.host, url.port, ec);
-    if (ec) {
-        r.statusCode = 503;
-        r.error = ec.message();
-        return r;
-    }
-    stream.connect(results, ec);
-    if (ec) {
-        r.statusCode = 503;
-        r.error = ec.message();
-        return r;
-    }
 
     http::verb method = http::verb::get;
     switch (cmd.verb) {
@@ -156,8 +215,8 @@ Response HttpClient::perform(const Command& cmd)
     }
 
     http::request<http::string_body> req{method, target, 11};
-    if (!cmd.body.empty()) {
-        req.body() = cmd.body;
+    if (!reqBody.empty()) {
+        req.body() = reqBody;
         req.set(http::field::content_type, "application/json");
         req.prepare_payload();
     }
@@ -171,23 +230,51 @@ Response HttpClient::perform(const Command& cmd)
         req.set(http::field::authorization, auth);
     }
 
-    http::write(stream, req, ec);
-    if (ec) {
-        r.statusCode = 503;
-        r.error = ec.message();
-        return r;
-    }
-
     beast::flat_buffer buffer;
     http::response<http::string_body> res;
-    http::read(stream, buffer, res, ec);
-    if (ec) {
-        r.statusCode = 503;
-        r.error = ec.message();
-        return r;
-    }
 
-    stream.socket().shutdown(net::ip::tcp::socket::shutdown_both, ec);
+    auto handle_response = [&](auto& stream, auto& ecIn) -> bool {
+        http::write(stream, req, ecIn);
+        if (ecIn) return false;
+        http::read(stream, buffer, res, ecIn);
+        if (ecIn) return false;
+        return true;
+    };
+
+    beast::error_code ec;
+    if (url.https) {
+        ssl::context ctx(ssl::context::tls_client);
+        ctx.set_default_verify_paths();
+        if (d_config.tlsInsecure) {
+            ctx.set_verify_mode(ssl::verify_none);
+        }
+        else {
+            ctx.set_verify_mode(ssl::verify_peer);
+        }
+        ssl::stream<beast::tcp_stream> stream(d_io, ctx);
+        net::ip::tcp::resolver resolver(d_io);
+        auto const results = resolver.resolve(url.host, url.port, ec);
+        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
+        beast::get_lowest_layer(stream).connect(results, ec);
+        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
+        if(! SSL_set_tlsext_host_name(stream.native_handle(), url.host.c_str())) {
+            ec.assign(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category());
+        }
+        stream.handshake(ssl::stream_base::client, ec);
+        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
+        if (!handle_response(stream, ec)) { r.statusCode = 503; r.error = ec.message(); return r; }
+        stream.shutdown(ec);
+    }
+    else {
+        beast::tcp_stream stream(d_io);
+        net::ip::tcp::resolver resolver(d_io);
+        auto const results = resolver.resolve(url.host, url.port, ec);
+        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
+        stream.connect(results, ec);
+        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
+        if (!handle_response(stream, ec)) { r.statusCode = 503; r.error = ec.message(); return r; }
+        stream.socket().shutdown(net::ip::tcp::socket::shutdown_both, ec);
+    }
 
     r.statusCode = static_cast<int>(res.result_int());
     r.body = std::move(res.body());

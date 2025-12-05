@@ -14,6 +14,7 @@ struct AdminConfig {
     bsl::string password;
     bsl::string vhost;     // default "/"
     bsl::string amqpUri;   // optional AMQP URI for publish/get
+    bool tlsInsecure{false};
 };
 
 enum class Verb { List, Show, Declare, Delete, Publish, Get, Unknown };

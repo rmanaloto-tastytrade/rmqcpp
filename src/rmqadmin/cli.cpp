@@ -26,6 +26,7 @@ CliParseResult parseCli(int argc, char** argv)
     app.add_option("-p,--password", out.config.password, "Password")->default_val("guest");
     app.add_option("-V,--vhost", out.config.vhost, "VHost")->default_val("/");
     app.add_option("--amqp-uri", out.config.amqpUri, "AMQP URI for publish/get via AMQP (optional)");
+    app.add_flag("--tls-insecure", out.config.tlsInsecure, "Do not verify TLS certificates for HTTPS");
 
     // Common parameter helpers
     bsl::string name;
