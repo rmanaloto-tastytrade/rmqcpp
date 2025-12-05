@@ -9,6 +9,9 @@ Rendered renderResponse(const Command& cmd, const Response& response)
     Rendered r;
     if (response) {
         bsl::cout << response.body << bsl::endl;
+        if (!response.contentType.empty()) {
+            // For now, logs are handled elsewhere.
+        }
     }
     else {
         r.exitCode = 1;

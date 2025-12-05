@@ -94,12 +94,15 @@ int main() { return 0; }
 set(CMAKE_REQUIRED_FLAGS "${_old_req_flags}")
 set(CMAKE_REQUIRED_LIBRARIES "${_old_req_libs}")
 set(CMAKE_REQUIRED_LINK_OPTIONS "${_old_req_link_opts}")
+if(APPLE)
+    set(RMQCPP_USE_LIBCXX_OK ON) # AppleClang defaults to libc++
+endif()
 if(NOT RMQCPP_USE_LIBCXX_OK)
     message(WARNING "Preset requires libc++; compiler is not using libc++.\n"
-                        "Install libc++/libc++abi dev packages (e.g. libc++-22-dev libc++abi-22-dev) and ensure "
-                        "the libc++ include/lib directories are on the search path (try -DLIBCXX_PREFIX=/usr/lib/llvm-22), "
-                        "or drop -stdlib=libc++.\n"
-                        "Probe info: include='${_libcxx_include}', lib='${_libcxx_lib}', libdir='${_libcxx_libdir}'.")
+                    "Install libc++/libc++abi dev packages (e.g. libc++-22-dev libc++abi-22-dev) and ensure "
+                    "the libc++ include/lib directories are on the search path (try -DLIBCXX_PREFIX=/usr/lib/llvm-22), "
+                    "or drop -stdlib=libc++.\n"
+                    "Probe info: include='${_libcxx_include}', lib='${_libcxx_lib}', libdir='${_libcxx_libdir}'.")
 endif()
 
 add_subdirectory(src)

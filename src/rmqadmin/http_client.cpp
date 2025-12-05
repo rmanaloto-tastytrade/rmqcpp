@@ -5,10 +5,12 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/beast/ssl.hpp>
+#include <boost/beast/core/detail/base64.hpp>
 
 #include <bsl_iostream.h>
 #include <bsl_string_view.h>
 #include <cctype>
+#include <string>
 
 namespace rmqadmin {
 
@@ -106,6 +108,7 @@ ParsedUrl parseBase(const bsl::string& base)
 HttpClient::HttpClient(const AdminConfig& config, net::io_context& io)
 : d_config(config)
 , d_io(io)
+, d_logger(logger)
 {
 }
 
@@ -117,12 +120,21 @@ Response HttpClient::perform(const Command& cmd)
     if (!url.valid) {
         r.statusCode = 400;
         r.error = "Invalid base URL";
+        if (d_logger) {
+            QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                            "Invalid base URL: {}", d_config.baseUrl);
+        }
         return r;
     }
 
+    std::string hostStr(url.host.data(), url.host.size());
+    std::string portStr(url.port.data(), url.port.size());
+
+    std::string reqBody;
+
     // Build target: /api/{resource} with vhost if required
     bsl::string target = url.target;
-    if (target.back() == '/') target.pop_back();
+    if (!target.empty() && target.back() == '/') target.pop_back();
     auto needsVhost = [&](const bsl::string& res) {
         return res == "queues" || res == "exchanges" || res == "bindings" ||
                res == "consumers" || res == "permissions";
@@ -144,12 +156,21 @@ Response HttpClient::perform(const Command& cmd)
         json += "\"payload_encoding\":\"string\"";
         json += "}";
         reqBody = json;
+        if (d_logger) {
+            QUILL_LOG_INFO(static_cast<quill::Logger*>(d_logger),
+                           "HTTP publish exchange={} rk={} bytes={}",
+                           exch, routingKey, payload.size());
+        }
     } else if (cmd.verb == Verb::Get) {
         bsl::string queue;
         if (auto it = cmd.params.find("queue"); it != cmd.params.end()) queue = it->second;
         if (queue.empty()) {
             r.statusCode = 400;
             r.error = "queue is required for get";
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "Get failed: queue missing");
+            }
             return r;
         }
         resourcePath = "/api/queues/" + urlEncode(d_config.vhost) + "/" + urlEncode(queue) + "/get";
@@ -168,12 +189,17 @@ Response HttpClient::perform(const Command& cmd)
         if (cmd.verb == Verb::Show || cmd.verb == Verb::Delete || cmd.verb == Verb::Declare) {
             auto it = cmd.params.find("name");
             if (it == cmd.params.end() || it->second.empty()) {
-                r.statusCode = 400;
-                r.error = "name is required for show/delete/declare";
-                return r;
+            r.statusCode = 400;
+            r.error = "name is required for show/delete/declare";
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "Name required for verb {} resource {}",
+                                static_cast<int>(cmd.verb), cmd.resource);
             }
-            resourcePath += "/" + urlEncode(it->second);
+            return r;
         }
+        resourcePath += "/" + urlEncode(it->second);
+    }
         if (cmd.verb == Verb::Declare) {
             // Very minimal declare body for queues/exchanges
             bsl::string json = "{";
@@ -190,6 +216,7 @@ Response HttpClient::perform(const Command& cmd)
     }
 
     target += resourcePath;
+    std::string targetStr(target.data(), target.size());
 
     http::verb method = http::verb::get;
     switch (cmd.verb) {
@@ -214,19 +241,20 @@ Response HttpClient::perform(const Command& cmd)
             break;
     }
 
-    http::request<http::string_body> req{method, target, 11};
+    http::request<http::string_body> req{method, targetStr, 11};
     if (!reqBody.empty()) {
         req.body() = reqBody;
         req.set(http::field::content_type, "application/json");
         req.prepare_payload();
     }
-    req.set(http::field::host, url.host);
+    req.set(http::field::host, hostStr);
     req.set(http::field::user_agent, "rmqadmin-cpp");
     if (!d_config.username.empty()) {
-        bsl::string creds = d_config.username + ":" + d_config.password;
-        // Use Beast base64; acceptable here for a client CLI.
-        bsl::string auth =
-            "Basic " + bsl::string(beast::detail::base64_encode(creds));
+        std::string creds = d_config.username + ":" + d_config.password;
+        std::string encoded(boost::beast::detail::base64::encoded_size(creds.size()), '\0');
+        auto sz = boost::beast::detail::base64::encode(&encoded[0], creds.data(), creds.size());
+        encoded.resize(sz);
+        std::string auth = "Basic " + encoded;
         req.set(http::field::authorization, auth);
     }
 
@@ -253,7 +281,7 @@ Response HttpClient::perform(const Command& cmd)
         }
         ssl::stream<beast::tcp_stream> stream(d_io, ctx);
         net::ip::tcp::resolver resolver(d_io);
-        auto const results = resolver.resolve(url.host, url.port, ec);
+        auto const results = resolver.resolve(hostStr, portStr, ec);
         if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
         beast::get_lowest_layer(stream).connect(results, ec);
         if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
@@ -268,7 +296,7 @@ Response HttpClient::perform(const Command& cmd)
     else {
         beast::tcp_stream stream(d_io);
         net::ip::tcp::resolver resolver(d_io);
-        auto const results = resolver.resolve(url.host, url.port, ec);
+        auto const results = resolver.resolve(hostStr, portStr, ec);
         if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
         stream.connect(results, ec);
         if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
@@ -278,7 +306,13 @@ Response HttpClient::perform(const Command& cmd)
 
     r.statusCode = static_cast<int>(res.result_int());
     r.body = std::move(res.body());
-    r.contentType = res[http::field::content_type].to_string().c_str();
+    auto ct = res[http::field::content_type];
+    r.contentType.assign(ct.begin(), ct.end());
+    if (d_logger) {
+        QUILL_LOG_INFO(static_cast<quill::Logger*>(d_logger),
+                       "HTTP {} {} -> {} bytes={}", targetStr,
+                       res.result_int(), res.result(), r.body.size());
+    }
     return r;
 }
 

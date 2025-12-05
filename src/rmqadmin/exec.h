@@ -7,11 +7,12 @@ namespace rmqadmin {
 
 class Executor {
   public:
-    explicit Executor(const AdminConfig& cfg);
+    Executor(const AdminConfig& cfg, void* logger);
     Response run(const Command& cmd);
 
   private:
     AdminConfig d_cfg;
+    void* d_logger;  // quill::Logger*
 };
 
 }  // namespace rmqadmin

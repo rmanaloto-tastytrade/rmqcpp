@@ -48,7 +48,7 @@ CliParseResult parseCli(int argc, char** argv)
     app.add_option("verb", verbStr, "Command verb (list/show/declare/delete/publish/get)")->required();
     app.add_option("resource", resource, "Resource (queues/exchanges/bindings/... )")->required();
 
-    CLI11_PARSE(app, argc, argv);
+    app.parse(argc, argv);
 
     out.command.verb = parseVerb(verbStr);
     out.command.resource = resource;

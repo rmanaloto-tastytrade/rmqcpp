@@ -29,6 +29,10 @@ struct Command {
     bsl::string body;  // serialized JSON body if applicable
 };
 
+struct Logging {
+    void* logger;  // opaque quill::Logger*
+};
+
 struct Response {
     int statusCode{0};
     bsl::string body;

@@ -7,11 +7,12 @@ namespace rmqadmin {
 
 class AmqpClient {
   public:
-    explicit AmqpClient(const AdminConfig& config);
+    AmqpClient(const AdminConfig& config, void* logger);
     Response perform(const Command& cmd);
 
   private:
     AdminConfig d_config;
+    void* d_logger;  // quill::Logger*
 };
 
 }  // namespace rmqadmin

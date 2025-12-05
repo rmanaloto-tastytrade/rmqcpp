@@ -9,12 +9,13 @@ namespace rmqadmin {
 
 class HttpClient {
   public:
-    HttpClient(const AdminConfig& config, boost::asio::io_context& io);
+    HttpClient(const AdminConfig& config, boost::asio::io_context& io, void* logger);
     Response perform(const Command& cmd);
 
   private:
     AdminConfig d_config;
     boost::asio::io_context& d_io;
+    void* d_logger;  // quill::Logger*
 };
 
 }  // namespace rmqadmin
