@@ -1,42 +1,73 @@
 {
-    "version": 6,
-    "configurePresets": [
-        {
-            "name": "base",
-            "hidden": true,
-            "description": "Base configuration for a build of rmqcpp",
-            "cacheVariables": {
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "1",
-                "CMAKE_BUILD_TYPE": "Debug",
-                "BDE_BUILD_TARGET_SAFE": true,
-                "CMAKE_CXX_STANDARD": "17",
-                "BDE_BUILD_TARGET_CPP17": "17",
-                "CMAKE_INSTALL_LIBDIR": "lib64"
-            }
-        },
-        {
-            "name": "macos-arm64-vcpkg",
-            "description": "VCPKG based configuration for building on arm-based MacOS",
-            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-            "inherits": "base",
-            "cacheVariables": {
-                "VCPKG_INSTALL_OPTIONS": "--allow-unsupported"
-            }
-        },
-        {
-            "name": "macos-x64-vcpkg",
-            "description": "VCPKG based configuration for building on x86_64-based MacOS",
-            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-            "inherits": "base",
-            "cacheVariables": {
-                "VCPKG_INSTALL_OPTIONS": "--allow-unsupported"
-            }
-        },
-        {
-            "name": "linux-x64-vcpkg",
-            "description": "VCPKG based configuration for building on x86_64-based Linux",
-            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-            "inherits": "base"
+  "version": 10,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "description": "Base configuration for a build of rmqcpp",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "1",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BDE_BUILD_TARGET_SAFE": true,
+        "CMAKE_CXX_STANDARD": "17",
+        "BDE_BUILD_TARGET_CPP17": "17",
+        "CMAKE_INSTALL_LIBDIR": "lib64",
+        "CMAKE_POLICY_DEFAULT_CMP0167": "NEW"
+      }
+    },
+    {
+      "name": "macos-arm64-vcpkg",
+      "description": "VCPKG based configuration for building on arm-based MacOS",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "inherits": "base",
+      "cacheVariables": {
+        "VCPKG_INSTALL_OPTIONS": "--allow-unsupported"
+      }
+    },
+    {
+      "name": "macos-x64-vcpkg",
+      "description": "VCPKG based configuration for building on x86_64-based MacOS",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "inherits": "base",
+      "cacheVariables": {
+        "VCPKG_INSTALL_OPTIONS": "--allow-unsupported"
+      }
+    },
+    {
+      "name": "linux-x64-vcpkg",
+      "description": "VCPKG based configuration for building on x86_64-based Linux",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "inherits": "base"
+    },
+    {
+      "name": "cppdev_c090s4_gcc15_clang22",
+      "description": "VCPKG configuration for the cppdev_c090s4_gcc15_clang22 remote (clang-22, Ninja)",
+      "generator": "Ninja",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "inherits": "base",
+      "environment": {
+        "VCPKG_ROOT": "/opt/vcpkg",
+        "PATH": "/usr/local/bin:/opt/vcpkg:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "CMAKE_C_COMPILER": "/usr/bin/clang-22",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++-22",
+        "CMAKE_CXX_STANDARD": "26",
+        "BDE_BUILD_TARGET_CPP17": "20",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libc++ -lc++abi",
+        "CMAKE_SHARED_LINKER_FLAGS": "-stdlib=libc++ -lc++abi",
+        "CMAKE_PREFIX_PATH": "/usr/lib/llvm-22",
+        "CMAKE_INCLUDE_PATH": "/usr/lib/llvm-22/include/c++/v1",
+        "CMAKE_LIBRARY_PATH": "/usr/lib/llvm-22/lib;/usr/lib/x86_64-linux-gnu",
+        "CMAKE_POLICY_DEFAULT_CMP0167": "NEW"
+      },
+      "vendor": {
+        "jetbrains.com/clion": {
+          "toolchain": "cppdev_c090s4_gcc15_clang22"
         }
-    ]
+      }
+    }
+  ]
 }
