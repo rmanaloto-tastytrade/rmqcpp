@@ -19,6 +19,7 @@ struct ParsedUrl {
     bsl::string host;
     bsl::string port{"15672"};
     bsl::string target{"/"};
+    bool https{false};
     bool valid{false};
 };
 
@@ -49,6 +50,8 @@ ParsedUrl parseBase(const bsl::string& base)
     }
     else if (v.rfind("https://", 0) == 0) {
         v.remove_prefix(8);
+        out.https = true;
+        out.port = "443";
     }
     auto slash = v.find('/');
     bsl::string_view hostport = slash == bsl::string_view::npos ? v : v.substr(0, slash);
@@ -101,11 +104,11 @@ Response HttpClient::perform(const Command& cmd)
     }
 
     // For show, append name if provided.
-    if (cmd.verb == Verb::Show) {
+    if (cmd.verb == Verb::Show || cmd.verb == Verb::Delete) {
         auto it = cmd.params.find("name");
         if (it == cmd.params.end() || it->second.empty()) {
             r.statusCode = 400;
-            r.error = "name is required for show";
+            r.error = "name is required for show/delete";
             return r;
         }
         resourcePath += "/" + urlEncode(it->second);
@@ -139,10 +142,16 @@ Response HttpClient::perform(const Command& cmd)
             method = http::verb::delete_;
             break;
         case Verb::Publish:
+            method = http::verb::post;
+            break;
         case Verb::Declare:
+            method = http::verb::put;
+            break;
         case Verb::Get:
+            method = http::verb::post;
+            break;
         default:
-            method = http::verb::get;  // TODO: implement these verbs
+            method = http::verb::get;
             break;
     }
 
