@@ -13,4 +13,5 @@ find_package(bal REQUIRED)
 
 add_subdirectory(rmq)
 add_subdirectory(rmqtestmocks)
+add_subdirectory(rmqadmin)
 add_subdirectory(tests)
