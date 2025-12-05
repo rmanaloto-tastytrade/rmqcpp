@@ -13,14 +13,18 @@ struct AdminConfig {
     bsl::string username;
     bsl::string password;
     bsl::string vhost;     // default "/"
+    bsl::string amqpUri;   // optional AMQP URI for publish/get
 };
 
 enum class Verb { List, Show, Declare, Delete, Publish, Get, Unknown };
+
+enum class BackendHint { Auto, HttpOnly, AmqpPreferred };
 
 struct Command {
     Verb verb;
     bsl::string resource;              // queues, exchanges, bindings, etc.
     bsl::map<bsl::string, bsl::string> params;
+    BackendHint backend{BackendHint::Auto};
 };
 
 struct Response {

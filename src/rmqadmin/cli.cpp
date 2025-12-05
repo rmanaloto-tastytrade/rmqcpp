@@ -25,6 +25,12 @@ CliParseResult parseCli(int argc, char** argv)
     app.add_option("-u,--username", out.config.username, "Username")->default_val("guest");
     app.add_option("-p,--password", out.config.password, "Password")->default_val("guest");
     app.add_option("-V,--vhost", out.config.vhost, "VHost")->default_val("/");
+    app.add_option("--amqp-uri", out.config.amqpUri, "AMQP URI for publish/get via AMQP (optional)");
+
+    bool useAmqpPublish = false;
+    bool useAmqpGet     = false;
+    app.add_flag("--amqp-publish", useAmqpPublish, "Use AMQP backend for publish");
+    app.add_flag("--amqp-get", useAmqpGet, "Use AMQP backend for get");
 
     bsl::string verbStr;
     bsl::string resource;
@@ -35,6 +41,10 @@ CliParseResult parseCli(int argc, char** argv)
 
     out.command.verb = parseVerb(verbStr);
     out.command.resource = resource;
+    if ((out.command.verb == Verb::Publish && useAmqpPublish) ||
+        (out.command.verb == Verb::Get && useAmqpGet)) {
+        out.command.backend = BackendHint::AmqpPreferred;
+    }
     return out;
 }
 
