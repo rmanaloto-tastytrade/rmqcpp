@@ -181,6 +181,18 @@ class QuillBallObserver : public ball::Observer {
     }
 };
 
+ball::Severity::Level parseBallSeverity(const bsl::string& s)
+{
+    std::string lower(s.data(), s.size());
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower == "fatal") return ball::Severity::e_FATAL;
+    if (lower == "error" || lower == "err") return ball::Severity::e_ERROR;
+    if (lower == "warn" || lower == "warning") return ball::Severity::e_WARN;
+    if (lower == "info") return ball::Severity::e_INFO;
+    if (lower == "debug") return ball::Severity::e_DEBUG;
+    return ball::Severity::e_TRACE;
+}
+
 std::string basicAuthHeader(const std::string& user, const std::string& password)
 {
     const std::string creds = user + ":" + password;
@@ -463,10 +475,11 @@ int main(int argc, char** argv)
 
     // Bridge rmqcpp's BALL logging into Quill to avoid UNINITIALIZED_LOGGER_MANAGER noise.
     ball::LoggerManagerConfiguration ballConfig;
-    // Capture everything from BALL and forward to Quill: record at TRACE,
-    // pass/publish at TRACE, trigger at ERROR, abort at FATAL.
-    ballConfig.setDefaultThresholdLevelsIfValid(ball::Severity::e_TRACE,
-                                                ball::Severity::e_TRACE,
+    const auto ballMin = parseBallSeverity(cfg.ballMinSeverity);
+    // Capture everything from BALL and forward to Quill: record/pass at chosen min,
+    // trigger at ERROR, abort at FATAL.
+    ballConfig.setDefaultThresholdLevelsIfValid(ballMin,
+                                                ballMin,
                                                 ball::Severity::e_ERROR,
                                                 ball::Severity::e_FATAL);
     ball::LoggerManagerScopedGuard ballGuard(ballConfig);
@@ -651,8 +664,9 @@ int main(int argc, char** argv)
         app.logger = logger;
         rmqa::RabbitContextOptions opts;
         // Single-threaded callback pool
+        // Increase queue depth to avoid drop when consuming many queues.
         app.threadPool = bsl::make_unique<ThreadPool>(
-            ThreadAttributes(), 1, 1, 60000);
+            ThreadAttributes(), 1, 1, 200000);
         app.threadPool->start();
         opts.setThreadpool(app.threadPool.get());
         app.ctx = bsl::make_unique<rmqa::RabbitContext>(opts);

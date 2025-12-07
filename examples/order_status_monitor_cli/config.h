@@ -30,6 +30,7 @@ struct ConnectionConfig {
     bsl::string definitionsJsonPath; // optional rabbitmqadmin-ng definitions export JSON
     bsl::string logDir{"logs"};
     bsl::string logPrefix{"order_status_monitor"};
+    bsl::string ballMinSeverity{"trace"};  // BALL->Quill threshold (trace|debug|info|warn|error|fatal)
     bool enableHttpAdmin{false};
     bsl::string httpAdminUser;
     bsl::string httpAdminPassword;

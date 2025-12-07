@@ -7,6 +7,7 @@ Minimal CLI that consumes order status messages using rmqcpp, logging every deli
 - JSON config (Glaze): pass with `--config path.json`; keys mirror the CLI (`host`, `port`, `vhost`, `exchange`, `direct_exchange`, `queue`, `topic_bindings`, `direct_bindings`, `prefetch`, `heartbeat_ms`, `connection_timeout_ms`, `durable`, `auto_delete`, `use_tls`, `ca_cert`, `client_cert`, `client_key`, `verify_mode`).
 - Environment overrides: `MQ_HOST`, `MQ_PORT`, `MQ_VHOST`, `MQ_USERNAME`, `MQ_PASSWORD`, `MQ_EXCHANGE_NAME`, `MQ_DIRECT_EXCHANGE_NAME`, `MQ_QUEUE_NAME`.
 - HTTP admin (optional): `enable_http_admin`, `http_admin_user`, `http_admin_password`, `http_admin_port` (defaults to AMQP creds/15672). When enabled, the CLI can discover queues/exchanges via the management API instead of a static definitions file.
+- BALL→Quill logging: use `ball_min_severity` (json/env `BALL_MIN_SEVERITY`, cli `--ball-min-severity`) to set the minimum BALL level forwarded to Quill (`trace|debug|info|warn|error|fatal`, default `trace`).
 
 Default topic binding: `accounts.*.orders.*.*` if none provided.
 
@@ -42,4 +43,4 @@ Implementation notes:
 ## rmqcpp internal logging (BALL)
 - rmqcpp uses the BDE BALL logger internally. Without initialization you’ll see `UNINITIALIZED_LOGGER_MANAGER` prefixes.
 - This CLI now bridges BALL → Quill automatically: at startup we create a `LoggerManagerScopedGuard`, register a custom BALL observer that forwards records into the configured Quill logger, and set thresholds to capture everything (TRACE/TRACE/ERROR/FATAL). All BALL records now land in the same Quill sink as application logs without the prefix.
-- Adjust thresholds or sinks in the BALL init block (`examples/order_status_monitor_cli/main.cpp`) if you want to quiet categories; for deeper BALL usage, see local docs at `bloomberg/bde/groups/bal/ball/doc`.
+- Adjust thresholds (`ball_min_severity`) or sinks in the BALL init block (`examples/order_status_monitor_cli/main.cpp`) if you want to quiet categories; for deeper BALL usage, see local docs at `bloomberg/bde/groups/bal/ball/doc`.

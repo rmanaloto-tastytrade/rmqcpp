@@ -41,6 +41,7 @@ struct JsonConfig {
     bsl::string definitionsJsonPath;
     bsl::string logDir{"logs"};
     bsl::string logPrefix{"order_status_monitor"};
+    bsl::string ballMinSeverity{"trace"};
     bool enableHttpAdmin{false};
     bsl::string httpAdminUser;
     bsl::string httpAdminPassword;
@@ -81,6 +82,7 @@ struct glz::meta<osmcli::JsonConfig> {
         "definitions_json", &T::definitionsJsonPath,
         "log_dir", &T::logDir,
         "log_prefix", &T::logPrefix,
+        "ball_min_severity", &T::ballMinSeverity,
         "enable_http_admin", &T::enableHttpAdmin,
         "http_admin_user", &T::httpAdminUser,
         "http_admin_password", &T::httpAdminPassword,
@@ -109,6 +111,7 @@ void applyEnvOverrides(ConnectionConfig& cfg)
     if (const char* v = std::getenv("MQ_QUEUE_NAME")) cfg.queueName = v;
     if (const char* v = std::getenv("MQ_LOG_DIR")) cfg.logDir = v;
     if (const char* v = std::getenv("MQ_LOG_PREFIX")) cfg.logPrefix = v;
+    if (const char* v = std::getenv("BALL_MIN_SEVERITY")) cfg.ballMinSeverity = v;
     if (const char* v = std::getenv("MQ_HTTP_ADMIN_ENABLE")) cfg.enableHttpAdmin = std::atoi(v) != 0;
     if (const char* v = std::getenv("MQ_HTTP_ADMIN_USER")) cfg.httpAdminUser = v;
     if (const char* v = std::getenv("MQ_HTTP_ADMIN_PASSWORD")) cfg.httpAdminPassword = v;
@@ -330,6 +333,9 @@ ConnectionConfig loadConfig(int argc, char** argv)
     app.add_option("--client-key", cfg.clientKeyPath, "Client key path");
     app.add_option("--log-dir", cfg.logDir, "Directory for log files (default: logs next to binary)");
     app.add_option("--log-prefix", cfg.logPrefix, "Log filename prefix (default: order_status_monitor)");
+    app.add_option("--ball-min-severity",
+                   cfg.ballMinSeverity,
+                   "BALL->Quill minimum severity (trace|debug|info|warn|error|fatal)");
     app.add_flag("--enable-http-admin", cfg.enableHttpAdmin, "Enable RabbitMQ HTTP management polling");
     app.add_option("--http-admin-user", cfg.httpAdminUser, "HTTP admin username (defaults to AMQP username)");
     app.add_option("--http-admin-password", cfg.httpAdminPassword, "HTTP admin password (defaults to AMQP password)");
@@ -391,6 +397,7 @@ ConnectionConfig loadConfig(int argc, char** argv)
             cfg.definitionsJsonPath = jc.definitionsJsonPath;
         if (!jc.logDir.empty()) cfg.logDir = jc.logDir;
         if (!jc.logPrefix.empty()) cfg.logPrefix = jc.logPrefix;
+        if (!jc.ballMinSeverity.empty()) cfg.ballMinSeverity = jc.ballMinSeverity;
         cfg.enableHttpAdmin = jc.enableHttpAdmin;
         if (!jc.httpAdminUser.empty()) cfg.httpAdminUser = jc.httpAdminUser;
         if (!jc.httpAdminPassword.empty()) cfg.httpAdminPassword = jc.httpAdminPassword;
