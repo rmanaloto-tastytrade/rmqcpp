@@ -20,8 +20,14 @@
       "description": "VCPKG based configuration for building on arm-based MacOS",
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "inherits": "base",
+      "environment": {
+        "VCPKG_ROOT": "${sourceDir}/vcpkg"
+      },
       "cacheVariables": {
-        "VCPKG_INSTALL_OPTIONS": "--allow-unsupported"
+        "VCPKG_INSTALL_OPTIONS": "--allow-unsupported",
+        "BDE_BUILD_TARGET_CPP17": "20",
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON"
       }
     },
     {
@@ -29,8 +35,34 @@
       "description": "VCPKG based configuration for building on x86_64-based MacOS",
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "inherits": "base",
+      "environment": {
+        "VCPKG_ROOT": "${sourceDir}/vcpkg"
+      },
       "cacheVariables": {
-        "VCPKG_INSTALL_OPTIONS": "--allow-unsupported"
+        "VCPKG_INSTALL_OPTIONS": "--allow-unsupported",
+        "BDE_BUILD_TARGET_CPP17": "20",
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON"
+      }
+    },
+    {
+      "name": "macos-arm64-vcpkg-llvm-26",
+      "description": "VCPKG config on arm macOS using Homebrew LLVM and C++26",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "inherits": "base",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/cmake-build-macos-arm64-vcpkg-llvm-26",
+      "environment": {
+        "VCPKG_ROOT": "${sourceDir}/vcpkg"
+      },
+      "cacheVariables": {
+        "VCPKG_INSTALL_OPTIONS": "--allow-unsupported",
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/llvm-macos.cmake",
+        "CMAKE_CXX_STANDARD": "26",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "BDE_BUILD_TARGET_CPP17": "26",
+        "CMAKE_PREFIX_PATH": "/opt/homebrew/opt/llvm",
+        "CMAKE_OSX_SYSROOT": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
       }
     },
     {
@@ -68,6 +100,14 @@
           "toolchain": "cppdev_c090s4_gcc15_clang22"
         }
       }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "macos-arm64-vcpkg-llvm-26",
+      "configurePreset": "macos-arm64-vcpkg-llvm-26",
+      "configuration": "Debug",
+      "cleanFirst": true
     }
   ]
 }

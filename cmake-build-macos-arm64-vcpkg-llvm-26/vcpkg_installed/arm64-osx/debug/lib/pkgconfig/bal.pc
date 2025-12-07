@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/lib
+includedir=${prefix}/../include
+
+Name: bal
+Description: bal 
+Version: 0.0.0 
+
+Libs: "-L${libdir}" -lbal
+Requires: bdl bsl 
+Cflags: "-I${includedir}" 

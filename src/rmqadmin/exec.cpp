@@ -5,12 +5,6 @@
 
 namespace rmqadmin {
 
-Executor::Executor(const AdminConfig& cfg)
-: d_cfg(cfg)
-, d_logger(nullptr)
-{
-}
-
 Executor::Executor(const AdminConfig& cfg, void* logger)
 : d_cfg(cfg)
 , d_logger(logger)

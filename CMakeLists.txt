@@ -105,6 +105,11 @@ if(NOT RMQCPP_USE_LIBCXX_OK)
                     "Probe info: include='${_libcxx_include}', lib='${_libcxx_lib}', libdir='${_libcxx_libdir}'.")
 endif()
 
+if(RMQCPP_USE_LIBCXX_OK)
+    # Ensure the libc++ runtime is linked even when upstream interface targets omit it.
+    link_libraries(c++ c++abi)
+endif()
+
 add_subdirectory(src)
 add_subdirectory(examples)
 

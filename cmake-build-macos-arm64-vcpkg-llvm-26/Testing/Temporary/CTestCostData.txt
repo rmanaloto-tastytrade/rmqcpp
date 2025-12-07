@@ -1,0 +1,8 @@
+rmqtestutil_tests 2 0.0641215
+rmqamqp_tests 2 0.120862
+rmqamqpt_tests 2 0.0549161
+rmqio_tests 2 3.07382
+rmqt_tests 2 0.123967
+rmqa_tests 2 0.330184
+rmqtestmocks_tests 2 0.0762594
+---

@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/lib
+includedir=${prefix}/../include
+
+Name: pcre2
+Description: pcre2 
+Version: 0.0.0 
+
+Libs: "-L${libdir}" -lpcre2
+Requires: 
+Cflags: "-I${includedir}" 

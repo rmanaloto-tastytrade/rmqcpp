@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" serverName="cppdev_c090s4_gcc15_clang22 (b03b7875-140a-4f3e-a631-b01f02c529b3)" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+    <option name="confirmBeforeUploading" value="false" />
+    <serverData>
+      <paths name="c0903s4.ny5 - ubuntu - gcc (dd45c9cd-94e5-4a4b-8b83-67f492b9daa5)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/tmp/tmp.lY8qNQQkkN/rmqcpp" local="$PROJECT_DIR$" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-linux-x64-vcpkg" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-macos-arm64-vcpkg" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-cppdev_c090s4_gcc15_clang22---debug" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-macos-x64-vcpkg" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-cppdev_c090s4_gcc15_clang22" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
+      <paths name="cppdev_c090s4_gcc15_clang22 (b03b7875-140a-4f3e-a631-b01f02c529b3)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/cppdev-cache/tmp/tmp.1L3wfnT2F1/rmqcpp" local="$PROJECT_DIR$" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-linux-x64-vcpkg" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-macos-arm64-vcpkg" />
+            <excludedPath local="true" path="$PROJECT_DIR$/out" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-cppdev_c090s4_gcc15_clang22---debug" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-macos-x64-vcpkg" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-cppdev_c090s4_gcc15_clang22" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
+    </serverData>
+  </component>
+</project>

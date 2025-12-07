@@ -10,6 +10,7 @@
       "gtest",
       "bde",
       "zstd",
-      "quill"
+      "quill",
+      "glaze"
     ]
-}
+  }

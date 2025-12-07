@@ -9,6 +9,7 @@ struct CliParseResult {
     AdminConfig config;
     Command command;
     bool helpRequested{false};
+    int exitCode{0};
 };
 
 CliParseResult parseCli(int argc, char** argv);

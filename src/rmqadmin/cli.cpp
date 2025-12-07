@@ -1,6 +1,7 @@
 #include "cli.h"
 
 #include <CLI/CLI.hpp>
+#include <stdexcept>
 
 namespace rmqadmin {
 
@@ -19,6 +20,7 @@ CliParseResult parseCli(int argc, char** argv)
 {
     CliParseResult out;
     CLI::App app{"rmqadmin (C++26) – management HTTP client"};
+    app.set_version_flag("-v,--version", "rmqadmin (C++26)");
 
     app.add_option("--url", out.config.baseUrl, "Management base URL (e.g. http://localhost:15672)")
         ->default_val("http://localhost:15672");
@@ -48,7 +50,23 @@ CliParseResult parseCli(int argc, char** argv)
     app.add_option("verb", verbStr, "Command verb (list/show/declare/delete/publish/get)")->required();
     app.add_option("resource", resource, "Resource (queues/exchanges/bindings/... )")->required();
 
-    app.parse(argc, argv);
+    try {
+        app.parse(argc, argv);
+    }
+    catch (const CLI::CallForHelp& e) {
+        out.exitCode = app.exit(e);
+        out.helpRequested = true;
+        return out;
+    }
+    catch (const CLI::CallForVersion& e) {
+        out.exitCode = app.exit(e);
+        out.helpRequested = true;
+        return out;
+    }
+    catch (const CLI::ParseError& e) {
+        // Let the caller log/exit; CLI already printed a hint.
+        throw std::runtime_error(e.what());
+    }
 
     out.command.verb = parseVerb(verbStr);
     out.command.resource = resource;

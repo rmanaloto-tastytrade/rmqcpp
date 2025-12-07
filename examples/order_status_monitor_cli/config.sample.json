@@ -1,0 +1,28 @@
+{
+  "host": "staging-rabbit-cluster.tastyworks.com",
+  "port": 5672,
+  "vhost": "/",
+  "username": "order-status-monitor",
+  "password": "zb3IrR4LUs7En8uiV7MI6Mbc",
+  "exchange": "services.api",
+  "direct_exchange": "oel.direct",
+  "queue": "order_status_monitor",
+  "topic_bindings": [
+    "accounts.*.orders.*.*"
+  ],
+  "direct_bindings": [
+    "orders.received",
+    "orders.cancel.requested"
+  ],
+  "prefetch": 50,
+  "heartbeat_ms": 60000,
+  "connection_timeout_ms": 10000,
+  "durable": true,
+  "auto_delete": false,
+  "run_seconds": 0,
+  "use_tls": false,
+  "ca_cert": "",
+  "client_cert": "",
+  "client_key": "",
+  "verify_mode": "VERIFY_SERVER"
+}

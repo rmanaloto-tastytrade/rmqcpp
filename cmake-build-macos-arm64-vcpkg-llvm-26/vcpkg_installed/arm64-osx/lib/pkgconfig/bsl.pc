@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: bsl
+Description: bsl 
+Version: 0.0.0 
+
+Libs: "-L${libdir}" -lbsl -lrt -lstdc++
+Requires: ryu 
+Cflags: "-I${includedir}" 

@@ -7,7 +7,9 @@
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/core/detail/base64.hpp>
 
-#include <bsl_iostream.h>
+#include <quill/LogMacros.h>
+#include <quill/Logger.h>
+
 #include <bsl_string_view.h>
 #include <cctype>
 #include <string>
@@ -105,7 +107,7 @@ ParsedUrl parseBase(const bsl::string& base)
 
 }  // namespace
 
-HttpClient::HttpClient(const AdminConfig& config, net::io_context& io)
+HttpClient::HttpClient(const AdminConfig& config, net::io_context& io, void* logger)
 : d_config(config)
 , d_io(io)
 , d_logger(logger)
@@ -122,7 +124,8 @@ Response HttpClient::perform(const Command& cmd)
         r.error = "Invalid base URL";
         if (d_logger) {
             QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
-                            "Invalid base URL: {}", d_config.baseUrl);
+                            "Invalid base URL: {}",
+                            std::string(d_config.baseUrl.data(), d_config.baseUrl.size()));
         }
         return r;
     }
@@ -159,9 +162,12 @@ Response HttpClient::perform(const Command& cmd)
         if (d_logger) {
             QUILL_LOG_INFO(static_cast<quill::Logger*>(d_logger),
                            "HTTP publish exchange={} rk={} bytes={}",
-                           exch, routingKey, payload.size());
+                           std::string(exch.data(), exch.size()),
+                           std::string(routingKey.data(), routingKey.size()),
+                           payload.size());
         }
-    } else if (cmd.verb == Verb::Get) {
+    }
+    else if (cmd.verb == Verb::Get) {
         bsl::string queue;
         if (auto it = cmd.params.find("queue"); it != cmd.params.end()) queue = it->second;
         if (queue.empty()) {
@@ -180,7 +186,8 @@ Response HttpClient::perform(const Command& cmd)
         json += "\"encoding\":\"auto\"";
         json += "}";
         reqBody = json;
-    } else {
+    }
+    else {
         resourcePath = "/api/" + cmd.resource;
         if (needsVhost(cmd.resource)) {
             resourcePath += "/" + urlEncode(d_config.vhost);
@@ -189,17 +196,18 @@ Response HttpClient::perform(const Command& cmd)
         if (cmd.verb == Verb::Show || cmd.verb == Verb::Delete || cmd.verb == Verb::Declare) {
             auto it = cmd.params.find("name");
             if (it == cmd.params.end() || it->second.empty()) {
-            r.statusCode = 400;
-            r.error = "name is required for show/delete/declare";
-            if (d_logger) {
-                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
-                                "Name required for verb {} resource {}",
-                                static_cast<int>(cmd.verb), cmd.resource);
+                r.statusCode = 400;
+                r.error = "name is required for show/delete/declare";
+                if (d_logger) {
+                    QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                    "Name required for verb {} resource {}",
+                                    static_cast<int>(cmd.verb),
+                                    std::string(cmd.resource.data(), cmd.resource.size()));
+                }
+                return r;
             }
-            return r;
+            resourcePath += "/" + urlEncode(it->second);
         }
-        resourcePath += "/" + urlEncode(it->second);
-    }
         if (cmd.verb == Verb::Declare) {
             // Very minimal declare body for queues/exchanges
             bsl::string json = "{";
@@ -282,25 +290,81 @@ Response HttpClient::perform(const Command& cmd)
         ssl::stream<beast::tcp_stream> stream(d_io, ctx);
         net::ip::tcp::resolver resolver(d_io);
         auto const results = resolver.resolve(hostStr, portStr, ec);
-        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
+        if (ec) {
+            r.statusCode = 503; r.error = ec.message();
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "HTTPS resolve failed host={} port={} error={}",
+                                hostStr, portStr, ec.message());
+            }
+            return r;
+        }
         beast::get_lowest_layer(stream).connect(results, ec);
-        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
+        if (ec) {
+            r.statusCode = 503; r.error = ec.message();
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "HTTPS connect failed host={} port={} error={}",
+                                hostStr, portStr, ec.message());
+            }
+            return r;
+        }
         if(! SSL_set_tlsext_host_name(stream.native_handle(), url.host.c_str())) {
             ec.assign(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category());
         }
         stream.handshake(ssl::stream_base::client, ec);
-        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
-        if (!handle_response(stream, ec)) { r.statusCode = 503; r.error = ec.message(); return r; }
+        if (ec) {
+            r.statusCode = 503; r.error = ec.message();
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "TLS handshake failed host={} error={}",
+                                hostStr, ec.message());
+            }
+            return r;
+        }
+        if (!handle_response(stream, ec)) {
+            r.statusCode = 503; r.error = ec.message();
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "HTTPS request failed target={} error={}",
+                                targetStr, ec.message());
+            }
+            return r;
+        }
         stream.shutdown(ec);
     }
     else {
         beast::tcp_stream stream(d_io);
         net::ip::tcp::resolver resolver(d_io);
         auto const results = resolver.resolve(hostStr, portStr, ec);
-        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
+        if (ec) {
+            r.statusCode = 503; r.error = ec.message();
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "TCP resolve failed host={} port={} error={}",
+                                hostStr, portStr, ec.message());
+            }
+            return r;
+        }
         stream.connect(results, ec);
-        if (ec) { r.statusCode = 503; r.error = ec.message(); return r; }
-        if (!handle_response(stream, ec)) { r.statusCode = 503; r.error = ec.message(); return r; }
+        if (ec) {
+            r.statusCode = 503; r.error = ec.message();
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "TCP connect failed host={} port={} error={}",
+                                hostStr, portStr, ec.message());
+            }
+            return r;
+        }
+        if (!handle_response(stream, ec)) {
+            r.statusCode = 503; r.error = ec.message();
+            if (d_logger) {
+                QUILL_LOG_ERROR(static_cast<quill::Logger*>(d_logger),
+                                "HTTP request failed target={} error={}",
+                                targetStr, ec.message());
+            }
+            return r;
+        }
         stream.socket().shutdown(net::ip::tcp::socket::shutdown_both, ec);
     }
 
@@ -310,8 +374,8 @@ Response HttpClient::perform(const Command& cmd)
     r.contentType.assign(ct.begin(), ct.end());
     if (d_logger) {
         QUILL_LOG_INFO(static_cast<quill::Logger*>(d_logger),
-                       "HTTP {} {} -> {} bytes={}", targetStr,
-                       res.result_int(), res.result(), r.body.size());
+                       "HTTP {} status={} bytes={}", targetStr,
+                       res.result_int(), r.body.size());
     }
     return r;
 }

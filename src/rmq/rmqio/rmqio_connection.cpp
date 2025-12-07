@@ -14,4 +14,5 @@
 // limitations under the License.
 
 // rmqio_connection.cpp   -*-C++-*-
+#include <cstdlib> // workaround: upstream BDE missing <cstdlib> in numeric formatter under C++26
 #include <rmqio_connection.h>

@@ -3,13 +3,17 @@
 
 #include "core.h"
 
+#include <quill/Logger.h>
+
 namespace rmqadmin {
 
 struct Rendered {
     int exitCode{0};
 };
 
-Rendered renderResponse(const Command& cmd, const Response& response);
+Rendered renderResponse(const Command& cmd,
+                        const Response& response,
+                        quill::Logger* logger);
 
 }  // namespace rmqadmin
 

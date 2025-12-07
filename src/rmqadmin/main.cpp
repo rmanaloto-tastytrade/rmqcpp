@@ -2,11 +2,10 @@
 #include "exec.h"
 #include "render.h"
 
+#include <quill/Backend.h>
 #include <quill/Frontend.h>
 #include <quill/LogMacros.h>
 #include <quill/sinks/ConsoleSink.h>
-
-#include <bsl_iostream.h>
 
 int main(int argc, char** argv)
 {
@@ -25,9 +24,12 @@ int main(int argc, char** argv)
         QUILL_LOG_ERROR(logger, "Failed to parse CLI: {}", ex.what());
         return 1;
     }
+    if (parsed.helpRequested) {
+        return parsed.exitCode;
+    }
 
     Executor exec(parsed.config, logger);
     Response resp = exec.run(parsed.command);
-    Rendered rendered = renderResponse(parsed.command, resp);
+    Rendered rendered = renderResponse(parsed.command, resp, logger);
     return rendered.exitCode;
 }
