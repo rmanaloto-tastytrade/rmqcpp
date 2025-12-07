@@ -8,6 +8,7 @@ target_link_libraries(rmq_order_status_monitor_cli PRIVATE
     bsl
     CLI11::CLI11
     quill::quill
+    fmt::fmt
 )
 
 target_include_directories(rmq_order_status_monitor_cli PRIVATE
@@ -32,3 +33,4 @@ endif()
 find_package(quill CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(bsl CONFIG REQUIRED)
+find_package(fmt CONFIG REQUIRED)

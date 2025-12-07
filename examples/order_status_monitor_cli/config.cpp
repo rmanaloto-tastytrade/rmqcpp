@@ -6,6 +6,7 @@
 #include <rmqt_simpleendpoint.h>
 #include <rmqt_mutualsecurityparameters.h>
 
+#include <bsl_unordered_set.h>
 #include <bsl_string.h>
 #include <cstdlib>
 #include <fstream>
@@ -22,6 +23,7 @@ struct JsonConfig {
     bsl::string exchange;
     bsl::string directExchange;
     bsl::string queueName;
+    bsl::vector<bsl::string> queues;
     bsl::vector<bsl::string> topicBindings;
     bsl::vector<bsl::string> directBindings;
     std::uint16_t prefetch{50};
@@ -35,6 +37,16 @@ struct JsonConfig {
     bsl::string clientCertPath;
     bsl::string clientKeyPath;
     bsl::string verifyMode;  // "VERIFY_SERVER" or "MUTUAL"
+    bsl::string queuesTsvPath;
+    bsl::string definitionsJsonPath;
+    bsl::string logDir{"logs"};
+    bsl::string logPrefix{"order_status_monitor"};
+    bool enableHttpAdmin{false};
+    bsl::string httpAdminUser;
+    bsl::string httpAdminPassword;
+    std::uint16_t httpAdminPort{15672};
+    bool skipAutoDeleteQueues{false};
+    bsl::string overviewCachePath;
 };
 
 }  // namespace osmcli
@@ -51,6 +63,7 @@ struct glz::meta<osmcli::JsonConfig> {
         "exchange", &T::exchange,
         "direct_exchange", &T::directExchange,
         "queue", &T::queueName,
+        "queues", &T::queues,
         "topic_bindings", &T::topicBindings,
         "direct_bindings", &T::directBindings,
         "prefetch", &T::prefetch,
@@ -63,7 +76,17 @@ struct glz::meta<osmcli::JsonConfig> {
         "ca_cert", &T::caCertPath,
         "client_cert", &T::clientCertPath,
         "client_key", &T::clientKeyPath,
-        "verify_mode", &T::verifyMode);
+        "verify_mode", &T::verifyMode,
+        "queues_tsv", &T::queuesTsvPath,
+        "definitions_json", &T::definitionsJsonPath,
+        "log_dir", &T::logDir,
+        "log_prefix", &T::logPrefix,
+        "enable_http_admin", &T::enableHttpAdmin,
+        "http_admin_user", &T::httpAdminUser,
+        "http_admin_password", &T::httpAdminPassword,
+        "http_admin_port", &T::httpAdminPort,
+        "skip_auto_delete_queues", &T::skipAutoDeleteQueues,
+        "overview_cache", &T::overviewCachePath);
 };
 
 namespace osmcli {
@@ -84,7 +107,153 @@ void applyEnvOverrides(ConnectionConfig& cfg)
     if (const char* v = std::getenv("MQ_EXCHANGE_NAME")) cfg.exchange = v;
     if (const char* v = std::getenv("MQ_DIRECT_EXCHANGE_NAME")) cfg.directExchange = v;
     if (const char* v = std::getenv("MQ_QUEUE_NAME")) cfg.queueName = v;
+    if (const char* v = std::getenv("MQ_LOG_DIR")) cfg.logDir = v;
+    if (const char* v = std::getenv("MQ_LOG_PREFIX")) cfg.logPrefix = v;
+    if (const char* v = std::getenv("MQ_HTTP_ADMIN_ENABLE")) cfg.enableHttpAdmin = std::atoi(v) != 0;
+    if (const char* v = std::getenv("MQ_HTTP_ADMIN_USER")) cfg.httpAdminUser = v;
+    if (const char* v = std::getenv("MQ_HTTP_ADMIN_PASSWORD")) cfg.httpAdminPassword = v;
+    if (const char* v = std::getenv("MQ_HTTP_ADMIN_PORT")) cfg.httpAdminPort = static_cast<std::uint16_t>(std::atoi(v));
+    if (const char* v = std::getenv("MQ_SKIP_AUTO_DELETE_QUEUES"))
+        cfg.skipAutoDeleteQueues = std::atoi(v) != 0;
+    if (const char* v = std::getenv("MQ_OVERVIEW_CACHE")) cfg.overviewCachePath = v;
 }
+
+namespace detail {
+bsl::vector<bsl::string> parseQueuesTsv(const bsl::string& path)
+{
+    bsl::vector<bsl::string> out;
+    std::ifstream in(path.c_str());
+    if (!in) {
+        throw std::runtime_error("Failed to open queues TSV: " + path);
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        // take first column before tab
+        const auto tabPos = line.find('\t');
+        const auto name = line.substr(0, tabPos);
+        if (name == "name" || name.empty()) continue;
+        out.push_back(name);
+    }
+    return out;
+}
+
+void dedupeQueues(bsl::vector<bsl::string>& queues)
+{
+    bsl::unordered_set<bsl::string> seen;
+    bsl::vector<bsl::string> uniq;
+    for (const auto& q : queues) {
+        if (q.empty()) continue;
+        if (seen.insert(q).second) {
+            uniq.push_back(q);
+        }
+    }
+    queues.swap(uniq);
+}
+
+// Minimal structures for rabbitmqadmin-ng definitions export
+struct DefinitionsQueue {
+    bsl::string name;
+    bsl::string vhost;
+};
+struct DefinitionsExchange {
+    bsl::string name;
+    bsl::string vhost;
+};
+struct DefinitionsBinding {
+    bsl::string vhost;
+    bsl::string source;
+    bsl::string destination;
+    bsl::string destinationType;
+    bsl::string routingKey;
+};
+struct DefinitionsVhost {
+    bsl::string name;
+};
+struct Definitions {
+    bsl::vector<DefinitionsQueue> queues;
+    bsl::vector<DefinitionsExchange> exchanges;
+    bsl::vector<DefinitionsBinding> bindings;
+    bsl::vector<DefinitionsVhost> vhosts;
+};
+
+Definitions readDefinitions(const bsl::string& path)
+{
+    std::ifstream in(path.c_str(), std::ios::binary);
+    if (!in) {
+        throw std::runtime_error("Failed to open definitions JSON: " + path);
+    }
+    std::string json((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+    Definitions defs;
+    // Allow unknown keys because definitions export contains many fields we
+    // don't map.
+    constexpr auto opts = ::glz::opts{.error_on_unknown_keys = false};
+    auto ec = ::glz::read<opts>(defs, json);
+    if (ec) {
+        throw std::runtime_error(
+            "Failed to parse definitions JSON: " + ::glz::format_error(ec, json));
+    }
+    return defs;
+}
+
+void mergeDefinitionsQueues(const Definitions& defs,
+                            const bsl::string& targetVhost,
+                            bsl::vector<bsl::string>& queues)
+{
+    for (const auto& q : defs.queues) {
+        if (q.vhost == targetVhost) {
+            queues.push_back(q.name);
+        }
+    }
+}
+
+}  // namespace detail
+
+}  // namespace osmcli
+
+namespace glz {
+template <>
+struct meta<osmcli::detail::DefinitionsQueue> {
+    using T = osmcli::detail::DefinitionsQueue;
+    static constexpr auto value = object("name", &T::name, "vhost", &T::vhost);
+};
+template <>
+struct meta<osmcli::detail::DefinitionsExchange> {
+    using T = osmcli::detail::DefinitionsExchange;
+    static constexpr auto value = object("name", &T::name, "vhost", &T::vhost);
+};
+template <>
+struct meta<osmcli::detail::DefinitionsBinding> {
+    using T = osmcli::detail::DefinitionsBinding;
+    static constexpr auto value = object("vhost",
+                                         &T::vhost,
+                                         "source",
+                                         &T::source,
+                                         "destination",
+                                         &T::destination,
+                                         "destination_type",
+                                         &T::destinationType,
+                                         "routing_key",
+                                         &T::routingKey);
+};
+template <>
+struct meta<osmcli::detail::DefinitionsVhost> {
+    using T = osmcli::detail::DefinitionsVhost;
+    static constexpr auto value = object("name", &T::name);
+};
+template <>
+struct meta<osmcli::detail::Definitions> {
+    using T = osmcli::detail::Definitions;
+    static constexpr auto value =
+        object("queues", &T::queues,
+               "exchanges", &T::exchanges,
+               "bindings", &T::bindings,
+               "vhosts", &T::vhosts);
+};
+}  // namespace glz
+
+namespace osmcli {
 
 bsl::shared_ptr<BloombergLP::rmqt::Endpoint> ConnectionConfig::endpoint() const
 {
@@ -109,6 +278,25 @@ std::optional<BloombergLP::rmqt::SecurityParameters> ConnectionConfig::security(
     return BloombergLP::rmqt::SecurityParameters(caCertPath);
 }
 
+DefinitionsSummary loadDefinitionsSummary(const bsl::string& path)
+{
+    const auto defs = detail::readDefinitions(path);
+    DefinitionsSummary out;
+    for (const auto& v : defs.vhosts) {
+        out.vhosts.push_back(v.name);
+    }
+    for (const auto& q : defs.queues) {
+        out.queues.push_back({q.name, q.vhost});
+    }
+    for (const auto& ex : defs.exchanges) {
+        out.exchanges.push_back({ex.name, ex.vhost});
+    }
+    for (const auto& b : defs.bindings) {
+        out.bindings.push_back({b.vhost, b.source, b.destination, b.destinationType, b.routingKey});
+    }
+    return out;
+}
+
 ConnectionConfig loadConfig(int argc, char** argv)
 {
     ConnectionConfig cfg;
@@ -123,7 +311,12 @@ ConnectionConfig loadConfig(int argc, char** argv)
     app.add_option("--password", cfg.password, "MQ password");
     app.add_option("--exchange", cfg.exchange, "Topic exchange");
     app.add_option("--direct-exchange", cfg.directExchange, "Direct exchange");
-    app.add_option("--queue", cfg.queueName, "Queue name");
+    app.add_option("--queue", cfg.queueName, "Queue name (single)");
+    app.add_option("--queue-list", cfg.queues, "Queue name (repeatable)");
+    app.add_option("--queues-tsv", cfg.queuesTsvPath, "TSV file with queue names (first column 'name')");
+    app.add_option("--definitions-json",
+                   cfg.definitionsJsonPath,
+                   "rabbitmqadmin-ng definitions export JSON (to populate queues by vhost)");
     app.add_option("--topic-binding", cfg.topicBindings, "Topic binding (repeatable)");
     app.add_option("--direct-binding", cfg.directBindings, "Direct binding (repeatable)");
     app.add_option("--prefetch", cfg.prefetch, "Prefetch for consumer");
@@ -135,6 +328,18 @@ ConnectionConfig loadConfig(int argc, char** argv)
     app.add_option("--ca-cert", cfg.caCertPath, "CA certificate path");
     app.add_option("--client-cert", cfg.clientCertPath, "Client certificate path");
     app.add_option("--client-key", cfg.clientKeyPath, "Client key path");
+    app.add_option("--log-dir", cfg.logDir, "Directory for log files (default: logs next to binary)");
+    app.add_option("--log-prefix", cfg.logPrefix, "Log filename prefix (default: order_status_monitor)");
+    app.add_flag("--enable-http-admin", cfg.enableHttpAdmin, "Enable RabbitMQ HTTP management polling");
+    app.add_option("--http-admin-user", cfg.httpAdminUser, "HTTP admin username (defaults to AMQP username)");
+    app.add_option("--http-admin-password", cfg.httpAdminPassword, "HTTP admin password (defaults to AMQP password)");
+    app.add_option("--http-admin-port", cfg.httpAdminPort, "HTTP admin port (default 15672)");
+    app.add_flag("--skip-auto-delete-queues",
+                 cfg.skipAutoDeleteQueues,
+                 "Skip auto-delete queues when discovering via HTTP admin");
+    app.add_option("--overview-cache",
+                   cfg.overviewCachePath,
+                   "Path to cached /api/overview JSON (used if HTTP admin is disabled)");
     bsl::string verifyModeStr = "VERIFY_SERVER";
     app.add_option("--verify-mode", verifyModeStr, "TLS verify mode (VERIFY_SERVER|MUTUAL)");
     app.add_option("--run-seconds", cfg.runSeconds, "Run duration seconds (0 = until signal)");
@@ -168,6 +373,7 @@ ConnectionConfig loadConfig(int argc, char** argv)
         if (!jc.exchange.empty()) cfg.exchange = jc.exchange;
         if (!jc.directExchange.empty()) cfg.directExchange = jc.directExchange;
         if (!jc.queueName.empty()) cfg.queueName = jc.queueName;
+        if (!jc.queues.empty()) cfg.queues = jc.queues;
         if (!jc.topicBindings.empty()) cfg.topicBindings = jc.topicBindings;
         if (!jc.directBindings.empty()) cfg.directBindings = jc.directBindings;
         cfg.prefetch = jc.prefetch;
@@ -181,25 +387,40 @@ ConnectionConfig loadConfig(int argc, char** argv)
         if (!jc.clientCertPath.empty()) cfg.clientCertPath = jc.clientCertPath;
         if (!jc.clientKeyPath.empty()) cfg.clientKeyPath = jc.clientKeyPath;
         if (!jc.verifyMode.empty()) cfg.verifyMode = parseVerifyMode(jc.verifyMode);
+        if (!jc.definitionsJsonPath.empty())
+            cfg.definitionsJsonPath = jc.definitionsJsonPath;
+        if (!jc.logDir.empty()) cfg.logDir = jc.logDir;
+        if (!jc.logPrefix.empty()) cfg.logPrefix = jc.logPrefix;
+        cfg.enableHttpAdmin = jc.enableHttpAdmin;
+        if (!jc.httpAdminUser.empty()) cfg.httpAdminUser = jc.httpAdminUser;
+        if (!jc.httpAdminPassword.empty()) cfg.httpAdminPassword = jc.httpAdminPassword;
+        if (jc.httpAdminPort) cfg.httpAdminPort = jc.httpAdminPort;
+        cfg.skipAutoDeleteQueues = jc.skipAutoDeleteQueues;
+        if (!jc.overviewCachePath.empty()) cfg.overviewCachePath = jc.overviewCachePath;
     }
 
     // Apply env overrides
     applyEnvOverrides(cfg);
 
+    // Merge queue sources: CLI/JSON list, single queue, TSV
+    if (!cfg.queueName.empty()) {
+        cfg.queues.push_back(cfg.queueName);
+    }
+    if (!cfg.queuesTsvPath.empty()) {
+        auto parsed = detail::parseQueuesTsv(cfg.queuesTsvPath);
+        cfg.queues.insert(cfg.queues.end(), parsed.begin(), parsed.end());
+    }
+    if (!cfg.definitionsJsonPath.empty()) {
+        auto defs = detail::readDefinitions(cfg.definitionsJsonPath);
+        detail::mergeDefinitionsQueues(defs, cfg.vhost, cfg.queues);
+    }
+    detail::dedupeQueues(cfg.queues);
+    if (!cfg.queues.empty()) {
+        cfg.queueName = cfg.queues.front();
+    }
+
     // Apply verify mode if provided on CLI
     cfg.verifyMode = parseVerifyMode(verifyModeStr);
-
-    // Defaults for bindings if empty
-    if (cfg.topicBindings.empty()) {
-        cfg.topicBindings.push_back("accounts.*.orders.*.*");
-    }
-
-    if (cfg.exchange.empty()) {
-        throw std::runtime_error("exchange is required (set --exchange or MQ_EXCHANGE_NAME)");
-    }
-    if (cfg.directExchange.empty()) {
-        throw std::runtime_error("direct exchange is required (set --direct-exchange or MQ_DIRECT_EXCHANGE_NAME)");
-    }
 
     return cfg;
 }
