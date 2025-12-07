@@ -66,3 +66,7 @@ tests/integration/logs
 
 # Doxygen generated files
 generateddocs/
+
+# Local order_status_monitor_cli configs (keep only samples in Git)
+examples/order_status_monitor_cli/config*.json
+!examples/order_status_monitor_cli/config.sample.json
