@@ -820,6 +820,21 @@ int main(int argc, char** argv)
     }
     auto logger = quill::simple_logger(logTarget);
     std::filesystem::path resolvedLogDir;
+    std::string runStamp;
+    {
+        auto now = std::chrono::system_clock::now();
+        const auto sec = std::chrono::time_point_cast<std::chrono::seconds>(now);
+        const auto ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec).count();
+        std::time_t tt = std::chrono::system_clock::to_time_t(sec);
+        std::tm tm{};
+#if defined(_WIN32)
+        localtime_s(&tm, &tt);
+#else
+        localtime_r(&tt, &tm);
+#endif
+        runStamp = fmt::format("{:%Y%m%d.%H%M%S}.{:09d}", tm, static_cast<int>(ns));
+    }
     if (logTarget != "stdout" && logTarget != "stderr") {
         resolvedLogDir = std::filesystem::path(logTarget).parent_path();
     }
@@ -1188,7 +1203,7 @@ int main(int argc, char** argv)
             for (const auto& qname : cfg.queues) {
                 // Per-queue callback to include queue name in logs
                 std::string qnameStd(qname.data(), qname.size());
-                auto onMessage = [logger, &app, qnameStd, &resolvedLogDir](rmqp::MessageGuard& guard) {
+                auto onMessage = [logger, &app, qnameStd, &resolvedLogDir, runStamp](rmqp::MessageGuard& guard) {
                     const auto& msg = guard.message();
                     const auto& env = guard.envelope();
                     std::string exchange(env.exchange().data(),
@@ -1203,7 +1218,8 @@ int main(int argc, char** argv)
                                                        std::uint64_t exitRealNs,
                                                        std::optional<std::uint64_t> socketTsNs = std::nullopt) {
                         if (resolvedLogDir.empty()) return;
-                        std::filesystem::path latPath = resolvedLogDir / "latency_samples.ndjson";
+                        std::filesystem::path latPath =
+                            resolvedLogDir / fmt::format("latency_samples-{}.ndjson", runStamp);
                         try {
                             if (latPath.has_parent_path()) {
                                 std::filesystem::create_directories(latPath.parent_path());
