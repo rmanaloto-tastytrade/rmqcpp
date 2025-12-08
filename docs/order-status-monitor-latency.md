@@ -29,6 +29,18 @@ For each point, record:
 - Convert to OTel spans or metrics (histogram for latency; span events for the three points). Respect existing OTEL enable/disable flags.
 - Include queue/exchange/vhost attributes on spans/metrics.
 
+## Platform handling (event loop)
+- Single-thread Asio loop; use native handles for opts and `recvmsg`.
+- **Linux**:
+  1. After connect, `setsockopt(native_handle, SOL_SOCKET, SO_TIMESTAMPING_NEW, SOF_TIMESTAMPING_RX_SOFTWARE|SOF_TIMESTAMPING_SOFTWARE|SOF_TIMESTAMPING_RAW_HARDWARE)` (fallback to `SO_TIMESTAMPNS` if needed).
+  2. Asio `async_wait` (read) → handler calls `recvmsg` on the native socket with a control buffer (`CMSG_SPACE(sizeof(timespec)*3)`).
+  3. Extract `SCM_TIMESTAMPING*` for socket arrival; if absent, fall back to `clock_gettime` at read boundary.
+  4. Hand payload to rmqcpp; stamp in-process start/end around the consumer callback.
+- **macOS**:
+  1. Try `SO_TIMESTAMP_MONOTONIC` (or `SO_TIMESTAMP`); if `setsockopt` fails, log and disable kernel timestamps.
+  2. Same `async_wait` → `recvmsg` pattern; if no control message, use user-space `clock_gettime` at read boundary.
+  3. Kernel TCP timestamps may be unavailable; treat as best-effort and document the limitation.
+
 ## Implementation outline
 1. Add a configuration flag to enable kernel timestamping (Linux-only) and a fallback for user-space timestamping.
 2. On connect, set socket options (`SO_TIMESTAMPING_NEW` or `SO_TIMESTAMPNS` on Linux; attempt `SO_TIMESTAMP_MONOTONIC` on macOS and log capability).
