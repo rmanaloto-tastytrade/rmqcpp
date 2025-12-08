@@ -24,6 +24,7 @@ struct ConnectionConfig {
     bsl::string directExchange;   // direct exchange
     bsl::string queueName{"order_status_monitor"};  // kept for backward compat
     bsl::vector<bsl::string> queues;                // can consume multiple queues
+    bsl::vector<bsl::string> queueWhitelist;        // optional allow-list when using HTTP discovery
     bsl::vector<bsl::string> topicBindings;
     bsl::vector<bsl::string> directBindings;
     bsl::string queuesTsvPath;  // optional TSV (name\t...) file to list queues

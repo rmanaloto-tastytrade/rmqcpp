@@ -204,6 +204,7 @@ struct HttpAdminSummary {
     std::string overviewJson;
     std::vector<std::string> skippedExclusive;
     std::vector<std::string> skippedAutoDelete;
+    std::vector<std::string> filteredByWhitelist;
 };
 }  // namespace osmcli_http
 
@@ -726,7 +727,8 @@ struct meta<osmcli_http::HttpAdminSummary> {
                "bindings", &T::bindings,
                "overview", &T::overview,
                "skippedExclusive", &T::skippedExclusive,
-               "skippedAutoDelete", &T::skippedAutoDelete);
+               "skippedAutoDelete", &T::skippedAutoDelete,
+               "filteredByWhitelist", &T::filteredByWhitelist);
 };
 
 template <>
@@ -960,17 +962,27 @@ int main(int argc, char** argv)
             std::vector<std::string> discovered;
             std::vector<std::string> skippedExclusive;
             std::vector<std::string> skippedAutoDelete;
+            std::vector<std::string> filteredWhitelist;
+            std::unordered_set<std::string> whitelistSet;
+            for (const auto& qn : cfg.queueWhitelist) {
+                whitelistSet.emplace(qn.data(), qn.size());
+            }
             for (const auto& q : httpSummary.queues) {
                 if (q.vhost == std::string(cfg.vhost.data(), cfg.vhost.size())) {
+                    const std::string qname(q.name.data(), q.name.size());
                     if (q.exclusive) {
-                        skippedExclusive.emplace_back(q.name.data(), q.name.size());
+                        skippedExclusive.emplace_back(qname);
                         continue;
                     }
                     if (cfg.skipAutoDeleteQueues && q.auto_delete) {
-                        skippedAutoDelete.emplace_back(q.name.data(), q.name.size());
+                        skippedAutoDelete.emplace_back(qname);
                         continue;
                     }
-                    discovered.emplace_back(q.name.data(), q.name.size());
+                    if (!whitelistSet.empty() && !whitelistSet.count(qname)) {
+                        filteredWhitelist.emplace_back(qname);
+                        continue;
+                    }
+                    discovered.emplace_back(qname);
                 }
             }
             dedupeStrings(discovered);
@@ -981,10 +993,12 @@ int main(int argc, char** argv)
                     cfg.queues.push_back(bsl::string(q.data(), q.size()));
                 }
                 cfg.queueName = cfg.queues.front();
+                const std::string includedList = fmt::format("{}", fmt::join(discovered, ","));
                 QUILL_LOG_INFO(logger,
-                               "[http] using live queue list for vhost={} count={}",
+                               "[http] using live queue list for vhost={} count={} included=[{}]",
                                std::string(cfg.vhost.data(), cfg.vhost.size()),
-                               cfg.queues.size());
+                               cfg.queues.size(),
+                               includedList);
                 if (!skippedExclusive.empty()) {
                     const std::string skipped =
                         fmt::format("{}", fmt::join(skippedExclusive, ","));
@@ -1000,6 +1014,15 @@ int main(int argc, char** argv)
                     QUILL_LOG_INFO(logger,
                                    "[http] skipped auto-delete queues (disabled via config): {}",
                                    skipped);
+                }
+                if (!filteredWhitelist.empty()) {
+                    dedupeStrings(filteredWhitelist);
+                    httpSummary.filteredByWhitelist = filteredWhitelist;
+                    const std::string filtered =
+                        fmt::format("{}", fmt::join(filteredWhitelist, ","));
+                    QUILL_LOG_INFO(logger,
+                                   "[http] filtered by whitelist (not included): {}",
+                                   filtered);
                 }
             } else {
                 QUILL_LOG_ERROR(logger,

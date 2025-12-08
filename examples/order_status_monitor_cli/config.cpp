@@ -24,6 +24,7 @@ struct JsonConfig {
     bsl::string directExchange;
     bsl::string queueName;
     bsl::vector<bsl::string> queues;
+    bsl::vector<bsl::string> queueWhitelist;
     bsl::vector<bsl::string> topicBindings;
     bsl::vector<bsl::string> directBindings;
     std::uint16_t prefetch{50};
@@ -75,6 +76,7 @@ struct glz::meta<osmcli::JsonConfig> {
         "direct_exchange", &T::directExchange,
         "queue", &T::queueName,
         "queues", &T::queues,
+        "queue_whitelist", &T::queueWhitelist,
         "topic_bindings", &T::topicBindings,
         "direct_bindings", &T::directBindings,
         "prefetch", &T::prefetch,
@@ -347,6 +349,9 @@ ConnectionConfig loadConfig(int argc, char** argv)
     app.add_option("--direct-exchange", cfg.directExchange, "Direct exchange");
     app.add_option("--queue", cfg.queueName, "Queue name (single)");
     app.add_option("--queue-list", cfg.queues, "Queue name (repeatable)");
+    app.add_option("--queue-whitelist",
+                   cfg.queueWhitelist,
+                   "Queue allow-list when using HTTP admin discovery (repeatable)");
     app.add_option("--queues-tsv", cfg.queuesTsvPath, "TSV file with queue names (first column 'name')");
     app.add_option("--definitions-json",
                    cfg.definitionsJsonPath,
@@ -423,6 +428,7 @@ ConnectionConfig loadConfig(int argc, char** argv)
         if (!jc.directExchange.empty()) cfg.directExchange = jc.directExchange;
         if (!jc.queueName.empty()) cfg.queueName = jc.queueName;
         if (!jc.queues.empty()) cfg.queues = jc.queues;
+        if (!jc.queueWhitelist.empty()) cfg.queueWhitelist = jc.queueWhitelist;
         if (!jc.topicBindings.empty()) cfg.topicBindings = jc.topicBindings;
         if (!jc.directBindings.empty()) cfg.directBindings = jc.directBindings;
         cfg.prefetch = jc.prefetch;

@@ -8,6 +8,7 @@
   "direct_exchange": "oel.direct",
   "queue": "order_status_monitor",
   "queues": [],
+  "queue_whitelist": [],
   "topic_bindings": [],
   "direct_bindings": [],
   "prefetch": 50,
