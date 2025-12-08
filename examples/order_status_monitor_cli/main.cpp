@@ -207,6 +207,17 @@ struct HttpAdminSummary {
     std::vector<std::string> skippedAutoDelete;
     std::vector<std::string> filteredByWhitelist;
 };
+
+struct LatencySample {
+    std::string queue;
+    std::int64_t duration_ns{};
+    std::uint64_t tsc_delta{};
+    std::uint64_t tsc_entry{};
+    std::uint64_t tsc_exit{};
+    std::uint64_t real_entry_ns{};
+    std::uint64_t real_exit_ns{};
+    std::optional<std::uint64_t> socket_ts_ns;
+};
 }  // namespace osmcli_http
 
 namespace {
@@ -746,6 +757,20 @@ struct meta<osmcli_http::HttpAdminSummary> {
 };
 
 template <>
+struct meta<LatencySample> {
+    using T = LatencySample;
+    static constexpr auto value =
+        object("queue", &T::queue,
+               "duration_ns", &T::duration_ns,
+               "tsc_delta", &T::tsc_delta,
+               "tsc_entry", &T::tsc_entry,
+               "tsc_exit", &T::tsc_exit,
+               "real_entry_ns", &T::real_entry_ns,
+               "real_exit_ns", &T::real_exit_ns,
+               "socket_timestamp_ns", &T::socket_ts_ns);
+};
+
+template <>
 struct meta<SpanJson> {
     using T = SpanJson;
     static constexpr auto value =
@@ -1224,19 +1249,22 @@ int main(int argc, char** argv)
                             if (latPath.has_parent_path()) {
                                 std::filesystem::create_directories(latPath.parent_path());
                             }
-                            std::ofstream out(latPath, std::ios::app);
-                            out << "{";
-                            out << "\"queue\":\"" << qnameStd << "\",";
-                            out << "\"duration_ns\":" << durNs << ",";
-                            out << "\"tsc_delta\":" << (exitTsc - entryTsc) << ",";
-                            out << "\"tsc_entry\":" << entryTsc << ",";
-                            out << "\"tsc_exit\":" << exitTsc << ",";
-                            out << "\"real_entry_ns\":" << entryRealNs << ",";
-                            out << "\"real_exit_ns\":" << exitRealNs;
-                            if (socketTsNs) {
-                                out << ",\"socket_timestamp_ns\":" << *socketTsNs;
+                            LatencySample sample;
+                            sample.queue = qnameStd;
+                            sample.duration_ns = durNs;
+                            sample.tsc_delta = exitTsc - entryTsc;
+                            sample.tsc_entry = entryTsc;
+                            sample.tsc_exit = exitTsc;
+                            sample.real_entry_ns = entryRealNs;
+                            sample.real_exit_ns = exitRealNs;
+                            sample.socket_ts_ns = socketTsNs;
+                            auto jsonExp = ::glz::write_json(sample);
+                            if (!jsonExp) {
+                                QUILL_LOG_WARNING(logger, "failed to serialize latency sample");
+                                return;
                             }
-                            out << "}\n";
+                            std::ofstream out(latPath, std::ios::app);
+                            out << *jsonExp << "\n";
                         }
                         catch (const std::exception& ex) {
                             QUILL_LOG_WARNING(logger, "failed to write latency sample: {}", ex.what());
