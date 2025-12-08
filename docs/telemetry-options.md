@@ -79,3 +79,25 @@
   - OpenTelemetry C++ (already wired) for histograms/spans.
   - Tracy (vcpkg `tracy`) for dev profiling; requires running the Tracy server.
   - Perfetto (vcpkg `perfetto`) for deep Linux tracing; heavier and better suited for profiling sessions.
+
+
+
+## Data flow & visualization options
+- **OTel (primary):** Emit histograms/spans for latency (queue/exchange/binding labels) to an OTLP collector. Use Grafana/Tempo/Jaeger/etc. for real-time dashboards.
+- **Arrow/Sparrow (optional offline store):** Buffer per-message samples and flush to Arrow IPC/Feather (vcpkg `arrow`) or a modern C++20 implementation like Sparrow (to be evaluated). Good for offline columnar analysis; heavier than OTel. Guarded by config.
+- **Perfetto (profiling):** Optional tracing for Linux (kernel+user) to inspect timelines; user-space only on macOS. Real-time viewing via Perfetto UI.
+- **Tracy (profiling):** Optional zones around handler for dev profiling; real-time viewing via Tracy server. Minimal code changes; not for always-on prod.
+- **Visualization (CLI/TUI):** Consider ftxui or imgui to present live stats/flight data from collected metrics/traces, if a local viewer is desired.
+
+## Planned data points & workflow (high level)
+- **Socket arrival timestamp** (Linux-only via SO_TIMESTAMPING/SCM_TIMESTAMPING) → stored with message metadata.
+- **Handler entry/exit timestamps** (current) via CLOCK_REALTIME and TSC.
+- **Per-message record:** {queue, exchange, binding, duration_ns, tsc_entry, tsc_exit, real_entry_ns, real_exit_ns, optional socket_ts_ns}.
+- **Export paths:**
+  - OTel histograms/spans (primary, out-of-process aggregation).
+  - Optional Arrow/Feather or Sparrow flush for offline analysis.
+  - Optional Perfetto/Tracy instrumentation for profiling sessions.
+- **Real-time view:** OTel dashboards (Grafana/etc.); optional TUI (ftxui/imgui) for local quick looks.
+
+## Notes on Arrow/Sparrow
+- vcpkg provides `arrow`; Sparrow (modern C++20 Arrow-like impl) needs evaluation/availability. Use Arrow IPC/Feather for columnar dumps if enabled.
