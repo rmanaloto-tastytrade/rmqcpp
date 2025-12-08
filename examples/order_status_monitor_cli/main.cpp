@@ -512,7 +512,8 @@ std::string basicAuthHeader(const std::string& user, const std::string& password
 std::string httpGet(const osmcli::ConnectionConfig& cfg,
                     const std::string& target,
                     const std::string& authHeader,
-                    std::chrono::milliseconds timeout = std::chrono::milliseconds(15000))
+                    std::chrono::milliseconds timeout = std::chrono::milliseconds(15000),
+                    quill::Logger* logger = nullptr)
 {
     asio::io_context ioc;
     const std::string host(cfg.host.data(), cfg.host.size());
@@ -621,7 +622,7 @@ std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
         const std::string target = addPageParams(baseTarget, page, pageSize);
         std::string body;
         try {
-            body = httpGet(cfg, target, authHeader);
+            body = httpGet(cfg, target, authHeader, std::chrono::milliseconds(15000), logger);
             auto chunk = parseArray<T>(body);
             if (chunk.empty()) break;
             all.insert(all.end(), chunk.begin(), chunk.end());
@@ -656,16 +657,6 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
                                  : std::string(cfg.httpAdminPassword.data(), cfg.httpAdminPassword.size());
     const std::string auth = basicAuthHeader(user, pass);
 
-    const auto vhostsJson = httpGet(cfg, "/api/vhosts", auth);
-    auto vhostsObj = parseArray<HttpVhost>(vhostsJson);
-    summary.vhosts.reserve(vhostsObj.size());
-    for (const auto& v : vhostsObj) summary.vhosts.emplace_back(v.name.data(), v.name.size());
-
-    summary.exchanges =
-        fetchPaged<HttpExchange>(cfg, "/api/exchanges?disable_stats=true", auth, logger);
-    summary.queues = fetchPaged<HttpQueue>(
-        cfg, "/api/queues?disable_stats=true&enable_queue_totals=true", auth, logger);
-    summary.bindings = fetchPaged<HttpBinding>(cfg, "/api/bindings", auth, logger);
     try {
         const auto overviewJson = httpGet(cfg, "/api/overview", auth);
         summary.overviewJson = overviewJson;
@@ -679,6 +670,16 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
     catch (const std::exception&) {
         summary.overview = std::nullopt;
     }
+    const auto vhostsJson = httpGet(cfg, "/api/vhosts", auth);
+    auto vhostsObj = parseArray<HttpVhost>(vhostsJson);
+    summary.vhosts.reserve(vhostsObj.size());
+    for (const auto& v : vhostsObj) summary.vhosts.emplace_back(v.name.data(), v.name.size());
+
+    summary.exchanges =
+        fetchPaged<HttpExchange>(cfg, "/api/exchanges?disable_stats=true", auth, logger);
+    summary.queues = fetchPaged<HttpQueue>(
+        cfg, "/api/queues?disable_stats=true&enable_queue_totals=true", auth, logger);
+    summary.bindings = fetchPaged<HttpBinding>(cfg, "/api/bindings", auth, logger);
     return summary;
 }
 
