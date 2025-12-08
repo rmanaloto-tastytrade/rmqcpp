@@ -184,6 +184,11 @@ struct HttpBinding {
     bsl::string routing_key;
 };
 
+template <class T>
+struct PagedResponse {
+    std::vector<T> items;
+};
+
 struct HttpAdminSummary {
     std::vector<std::string> vhosts;
     std::vector<HttpExchange> exchanges;
@@ -582,10 +587,16 @@ std::vector<T> parseArray(const std::string& json)
     std::vector<T> out;
     constexpr auto opts = ::glz::opts{.error_on_unknown_keys = false};
     auto ec = ::glz::read<opts>(out, json);
-    if (ec) {
-        throw std::runtime_error("Failed to parse HTTP response: " + ::glz::format_error(ec, json));
+    if (!ec) {
+        return out;
     }
-    return out;
+    // Try paged envelope: { "items": [...] }
+    osmcli_http::PagedResponse<T> paged;
+    auto ec2 = ::glz::read<opts>(paged, json);
+    if (ec2) {
+        throw std::runtime_error("Failed to parse HTTP response: " + ::glz::format_error(ec2, json));
+    }
+    return paged.items;
 }
 
 template <class T>
@@ -720,6 +731,12 @@ struct meta<osmcli_http::HttpBinding> {
                "destination", &T::destination,
                "destination_type", &T::destination_type,
                "routing_key", &T::routing_key);
+};
+
+template <class T>
+struct meta<osmcli_http::PagedResponse<T> > {
+    using Obj = osmcli_http::PagedResponse<T>;
+    static constexpr auto value = object("items", &Obj::items);
 };
 
 template <>
