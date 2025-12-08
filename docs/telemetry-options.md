@@ -37,3 +37,9 @@
 ## Notes
 - vcpkg search results: `perfetto`, `tracy` available; no PAPI/libpfm ports; `lexbor[perf]` mentions rdtsc but is unrelated.
 - Abseil/Google Benchmark bring cycle clocks but are heavier than a small in-tree helper.
+
+## Hardware counter research
+- **Linux**: Invariant TSC on modern x86_64 is stable across cores/sockets; use RDTSCP for ordered reads. For PMU events, perf_event_open (or PAPI/libpfm overlays) is the path; NUMA/multi-socket systems can have skewed TSC on very old CPUs, but current hardware keeps TSC synchronized. Use rdtscp/steady_clock if unsure.
+- **macOS (Apple Silicon)**: PMU access is restricted; no perf_event_open. Expect user-space clocks only (mach_absolute_time). No direct access to cycle counters without entitlements.
+- **AArch64/Linux**: CNTVCT_EL0 virtual counter is typically enabled; read via `mrs %0, cntvct_el0` or `__builtin_readcyclecounter` if available.
+- **Libraries reviewed**: Tracy, Perfetto (available in vcpkg); qlibs/perf (local, x86/Linux-focused, not in vcpkg); no small rdtsc wrapper in vcpkg. Conclusion: keep a small in-tree helper for cycle reads and rely on OTel/Tracy/Perfetto for higher-level instrumentation.
