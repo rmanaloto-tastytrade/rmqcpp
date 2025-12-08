@@ -21,7 +21,7 @@
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "inherits": "base",
       "environment": {
-        "VCPKG_ROOT": "${sourceDir}/vcpkg"
+        "VCPKG_ROOT": "/opt/vcpkg"
       },
       "cacheVariables": {
         "VCPKG_INSTALL_OPTIONS": "--allow-unsupported",
@@ -36,7 +36,7 @@
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "inherits": "base",
       "environment": {
-        "VCPKG_ROOT": "${sourceDir}/vcpkg"
+        "VCPKG_ROOT": "/opt/vcpkg"
       },
       "cacheVariables": {
         "VCPKG_INSTALL_OPTIONS": "--allow-unsupported",
@@ -54,7 +54,7 @@
       "binaryDir": "${sourceDir}/cmake-out/macos-arm64-vcpkg-llvm-26",
       "installDir": "${sourceDir}/cmake-out/macos-arm64-vcpkg-llvm-26/install",
       "environment": {
-        "VCPKG_ROOT": "${sourceDir}/vcpkg"
+        "VCPKG_ROOT": "/opt/vcpkg"
       },
       "cacheVariables": {
         "VCPKG_INSTALL_OPTIONS": "--allow-unsupported",

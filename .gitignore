@@ -71,6 +71,7 @@ tests/integration/logs
 examples/order_status_monitor_cli/logs/
 examples/order_status_monitor_cli/*.log
 examples/order_status_monitor_cli/overview.cache.json
+/vcpkg/
 
 # Doxygen generated files
 generateddocs/
