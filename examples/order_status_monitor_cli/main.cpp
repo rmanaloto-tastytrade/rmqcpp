@@ -1196,11 +1196,11 @@ int main(int argc, char** argv)
                     std::string routingKey(env.routingKey().data(),
                                            env.routingKey().size());
                     const auto entrySteady = std::chrono::steady_clock::now();
-                    const auto entryReal = std::chrono::system_clock::now();
+                    const std::uint64_t entryRealNs = TW::getRealtimeNs();
                     const std::uint64_t entryTsc = TW::getTSC();
                     ScopeExit exitGuard([&] {
                         const auto exitSteady = std::chrono::steady_clock::now();
-                        const auto exitReal = std::chrono::system_clock::now();
+                        const std::uint64_t exitRealNs = TW::getRealtimeNs();
                         const std::uint64_t exitTsc = TW::getTSC();
                         const auto durNs =
                             std::chrono::duration_cast<std::chrono::nanoseconds>(exitSteady - entrySteady).count();
@@ -1210,10 +1210,8 @@ int main(int argc, char** argv)
                                         durNs,
                                         entryTsc,
                                         exitTsc,
-                                        std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                            entryReal.time_since_epoch()).count(),
-                                        std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                            exitReal.time_since_epoch()).count());
+                                        entryRealNs,
+                                        exitRealNs);
                     });
 #if OSMCLI_HAVE_OTEL
                     if (app.counterMessages) {

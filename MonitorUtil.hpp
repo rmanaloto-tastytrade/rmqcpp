@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <chrono>
+#include <atomic>
 
 #if defined(__APPLE__)
 #    include <mach/mach_time.h>
@@ -37,6 +38,28 @@ inline std::uint64_t getTSC()
     asm volatile("mrs %0, cntvct_el0" : "=r"(val));
 #    endif
     return val;
+#else
+    return static_cast<std::uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+#endif
+}
+
+inline std::uint64_t getRealtimeNs()
+{
+#if defined(__APPLE__)
+    static std::atomic<bool> init{false};
+    static mach_timebase_info_data_t info{};
+    if (!init.load(std::memory_order_acquire)) {
+        mach_timebase_info(&info);
+        init.store(true, std::memory_order_release);
+    }
+    const auto t = mach_absolute_time();
+    return (t * info.numer) / (info.denom ? info.denom : 1);
+#elif defined(__linux__)
+    timespec ts{};
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return static_cast<std::uint64_t>(ts.tv_sec) * 1000000000ull +
+           static_cast<std::uint64_t>(ts.tv_nsec);
 #else
     return static_cast<std::uint64_t>(
         std::chrono::steady_clock::now().time_since_epoch().count());
