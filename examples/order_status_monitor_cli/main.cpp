@@ -1188,7 +1188,7 @@ int main(int argc, char** argv)
             for (const auto& qname : cfg.queues) {
                 // Per-queue callback to include queue name in logs
                 std::string qnameStd(qname.data(), qname.size());
-                auto onMessage = [logger, &app, qnameStd](rmqp::MessageGuard& guard) {
+                auto onMessage = [logger, &app, qnameStd, &resolvedLogDir](rmqp::MessageGuard& guard) {
                     const auto& msg = guard.message();
                     const auto& env = guard.envelope();
                     std::string exchange(env.exchange().data(),
@@ -1198,7 +1198,10 @@ int main(int argc, char** argv)
                     const auto entrySteady = std::chrono::steady_clock::now();
                     const std::uint64_t entryRealNs = TW::getRealtimeNs();
                     const std::uint64_t entryTsc = TW::getTSC();
-                    const auto writeLatencySample = [&](std::optional<std::uint64_t> socketTsNs = std::nullopt) {
+                    const auto writeLatencySample = [&](std::int64_t durNs,
+                                                       std::uint64_t exitTsc,
+                                                       std::uint64_t exitRealNs,
+                                                       std::optional<std::uint64_t> socketTsNs = std::nullopt) {
                         if (resolvedLogDir.empty()) return;
                         std::filesystem::path latPath = resolvedLogDir / "latency_samples.ndjson";
                         try {
@@ -1209,6 +1212,7 @@ int main(int argc, char** argv)
                             out << "{";
                             out << "\"queue\":\"" << qnameStd << "\",";
                             out << "\"duration_ns\":" << durNs << ",";
+                            out << "\"tsc_delta\":" << (exitTsc - entryTsc) << ",";
                             out << "\"tsc_entry\":" << entryTsc << ",";
                             out << "\"tsc_exit\":" << exitTsc << ",";
                             out << "\"real_entry_ns\":" << entryRealNs << ",";
@@ -1236,7 +1240,7 @@ int main(int argc, char** argv)
                                         exitTsc,
                                         entryRealNs,
                                         exitRealNs);
-                        writeLatencySample();
+                        writeLatencySample(durNs, exitTsc, exitRealNs);
                     });
 #if OSMCLI_HAVE_OTEL
                     if (app.counterMessages) {
