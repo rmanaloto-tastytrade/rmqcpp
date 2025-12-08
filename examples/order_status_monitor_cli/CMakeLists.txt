@@ -34,3 +34,28 @@ find_package(quill CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(bsl CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(opentelemetry-cpp CONFIG)
+find_package(Python3 COMPONENTS Interpreter)
+
+if(opentelemetry-cpp_FOUND)
+    target_link_libraries(rmq_order_status_monitor_cli PRIVATE
+        opentelemetry-cpp::sdk
+        opentelemetry-cpp::otlp_http_exporter
+        opentelemetry-cpp::otlp_http_metric_exporter
+    )
+    target_compile_definitions(rmq_order_status_monitor_cli PRIVATE OSMCLI_HAVE_OTEL=1 OSMCLI_HAVE_OTEL_GRPC=0 OSMCLI_HAVE_OTEL_HTTP=1)
+else()
+    message(STATUS "opentelemetry-cpp not found; OTel disabled")
+endif()
+
+if(Python3_Interpreter_FOUND)
+    add_custom_target(order_status_monitor_cli_diff
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_overview.py
+                --config ${CMAKE_CURRENT_SOURCE_DIR}/config.local.json
+                --logs-dir ${CMAKE_CURRENT_BINARY_DIR}/logs
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Diff /api/overview (curl) vs latest http_overview-*.json")
+else()
+    message(STATUS "Python3 interpreter not found; diff target disabled")
+endif()

@@ -44,6 +44,8 @@ compile_commands.json
 CMakeUserPresets.json
 /cmake.bld/
 /cmake-out/
+/cmake-build-*/
+/cmake-build-*/
 
 # Ignore Mac DS_Store files
 **/.DS_Store

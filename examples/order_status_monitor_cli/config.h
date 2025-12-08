@@ -31,6 +31,18 @@ struct ConnectionConfig {
     bsl::string logDir{"logs"};
     bsl::string logPrefix{"order_status_monitor"};
     bsl::string ballMinSeverity{"trace"};  // BALL->Quill threshold (trace|debug|info|warn|error|fatal)
+    std::uint32_t threadPoolQueueDepth{200000};  // callback queue depth for single-thread pool
+
+    // OpenTelemetry
+    bool enableOtel{false};
+    bool enableOtelTraces{true};
+    bool enableOtelMetrics{true};
+    bool enableOtelExport{true};  // disable to skip exporter wiring even if enabled
+    bsl::string otelProtocol{"grpc"};      // grpc|http|file
+    bsl::string otelEndpoint{"localhost:4317"};  // for grpc host:port, for http full URL
+    bsl::string otelExportFile;             // when protocol=file, path for NDJSON spans
+    bsl::string otelServiceName{"order-status-monitor-cli"};
+    bsl::string otelEnvironment;  // from SITE/OEL_ENVIRONMENT if set
     bool enableHttpAdmin{false};
     bsl::string httpAdminUser;
     bsl::string httpAdminPassword;

@@ -50,6 +50,113 @@
 #include <ball_severity.h>
 #include <bsl_memory.h>
 
+#ifndef OSMCLI_HAVE_OTEL
+#  if __has_include(<opentelemetry/sdk/trace/tracer_provider.h>)
+#    define OSMCLI_HAVE_OTEL 1
+#  else
+#    define OSMCLI_HAVE_OTEL 0
+#  endif
+#endif
+#ifndef OSMCLI_HAVE_OTEL_GRPC
+#  define OSMCLI_HAVE_OTEL_GRPC 0
+#endif
+#ifndef OSMCLI_HAVE_OTEL_HTTP
+#  define OSMCLI_HAVE_OTEL_HTTP 0
+#endif
+
+#if OSMCLI_HAVE_OTEL
+#include <opentelemetry/exporters/otlp/otlp_http_exporter.h>
+#include <opentelemetry/exporters/otlp/otlp_http_metric_exporter.h>
+#if OSMCLI_HAVE_OTEL
+#if OSMCLI_HAVE_OTEL_GRPC
+#include <opentelemetry/exporters/otlp/otlp_grpc_exporter.h>
+#include <opentelemetry/exporters/otlp/otlp_grpc_metric_exporter.h>
+#endif
+#include <opentelemetry/sdk/trace/span_data.h>
+#include <opentelemetry/sdk/metrics/meter_provider.h>
+#include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader.h>
+#include <opentelemetry/sdk/resource/resource.h>
+#include <opentelemetry/sdk/trace/batch_span_processor.h>
+#include <opentelemetry/sdk/trace/simple_processor.h>
+#include <opentelemetry/sdk/trace/tracer_provider.h>
+#include <opentelemetry/metrics/provider.h>
+#include <opentelemetry/trace/provider.h>
+#include <opentelemetry/trace/scope.h>
+#include <opentelemetry/trace/span.h>
+#endif
+
+#if OSMCLI_HAVE_OTEL
+struct OtelContext {
+    std::shared_ptr<opentelemetry::trace::TracerProvider> tracerProvider;
+    std::shared_ptr<opentelemetry::metrics::MeterProvider> meterProvider;
+};
+
+struct SpanJson {
+    std::string name;
+    std::string trace_id;
+    std::string span_id;
+    std::string parent_span_id;
+    std::int64_t start_unix_nano;
+    std::int64_t end_unix_nano;
+};
+
+struct FileSpanExporter : public opentelemetry::sdk::trace::SpanExporter {
+    explicit FileSpanExporter(const std::string& path)
+    : d_path(path)
+    {
+        if (!d_path.empty()) {
+            d_out.open(d_path, std::ios::app);
+        }
+    }
+
+    std::unique_ptr<opentelemetry::sdk::trace::Recordable> MakeRecordable() noexcept override
+    {
+        return std::unique_ptr<opentelemetry::sdk::trace::Recordable>(
+            new opentelemetry::sdk::trace::SpanData);
+    }
+
+    opentelemetry::sdk::common::ExportResult Export(
+        const opentelemetry::nostd::span<std::unique_ptr<opentelemetry::sdk::trace::Recordable>>& spans) noexcept override
+    {
+        if (!d_out.is_open()) return opentelemetry::sdk::common::ExportResult::kFailure;
+        for (auto& rec : spans) {
+            auto* sd = dynamic_cast<opentelemetry::sdk::trace::SpanData*>(rec.get());
+            if (!sd) continue;
+            char traceBuf[32];
+            char spanBuf[16];
+            char parentBuf[16];
+            sd->GetTraceId().ToLowerBase16(traceBuf);
+            sd->GetSpanId().ToLowerBase16(spanBuf);
+            sd->GetParentSpanId().ToLowerBase16(parentBuf);
+            auto nameView = sd->GetName();
+            auto start = sd->GetStartTime().time_since_epoch();
+            auto end = start + sd->GetDuration();
+            SpanJson sj{
+                std::string(nameView.data(), nameView.size()),
+                std::string(traceBuf, sizeof traceBuf),
+                std::string(spanBuf, sizeof spanBuf),
+                std::string(parentBuf, sizeof parentBuf),
+                static_cast<std::int64_t>(start.count()),
+                static_cast<std::int64_t>(end.count()),
+            };
+            auto jsonExp = ::glz::write_json(sj);
+            if (jsonExp) {
+                d_out << *jsonExp << "\n";
+            }
+        }
+        d_out.flush();
+        return opentelemetry::sdk::common::ExportResult::kSuccess;
+    }
+
+    bool ForceFlush(std::chrono::microseconds) noexcept override { return true; }
+    bool Shutdown(std::chrono::microseconds) noexcept override { return true; }
+
+  private:
+    std::string d_path;
+    std::ofstream d_out;
+};
+#endif
+
 namespace osmcli_http {
 struct HttpVhost {
     bsl::string name;
@@ -94,12 +201,23 @@ struct HttpAdminSummary {
         } object_totals;
     };
     std::optional<Overview> overview;
+    std::string overviewJson;
+    std::vector<std::string> skippedExclusive;
+    std::vector<std::string> skippedAutoDelete;
 };
 }  // namespace osmcli_http
 
 namespace {
 using namespace osmcli;
 using namespace osmcli_http;
+#if OSMCLI_HAVE_OTEL
+namespace otel = opentelemetry;
+namespace otel_sdk = opentelemetry::sdk;
+namespace otel_trace = opentelemetry::sdk::trace;
+namespace otel_metrics = opentelemetry::sdk::metrics;
+namespace otel_resource = opentelemetry::sdk::resource;
+namespace otel_nostd = opentelemetry::nostd;
+#endif
 namespace rmqa = BloombergLP::rmqa;
 namespace rmqt = BloombergLP::rmqt;
 namespace rmqp = BloombergLP::rmqp;
@@ -118,6 +236,14 @@ struct App {
     bsl::shared_ptr<rmqa::VHost> vhost;
     bsl::vector<bsl::shared_ptr<rmqa::Consumer> > consumers;
     quill::Logger* logger{nullptr};
+#if OSMCLI_HAVE_OTEL
+    otel_nostd::shared_ptr<opentelemetry::trace::Tracer> tracer;
+    otel_nostd::shared_ptr<opentelemetry::metrics::Meter> meter;
+    otel_nostd::unique_ptr<opentelemetry::metrics::Counter<uint64_t> > counterMessages;
+    otel_nostd::unique_ptr<opentelemetry::metrics::Counter<uint64_t> > counterEnqueueFails;
+#endif
+    std::atomic<uint64_t> messages{0};
+    std::atomic<uint64_t> enqueueFailures{0};
 };
 
 class QuillBallObserver : public ball::Observer {
@@ -132,6 +258,12 @@ class QuillBallObserver : public ball::Observer {
         if (!d_logger) return;
         const auto& ff = record.fixedFields();
         const std::string_view cat = ff.category();
+        // Suppress chatty channel/connection noise unless it is WARN or higher.
+        if ((cat.rfind("RMQAMQP.CHANNEL", 0) == 0 ||
+             cat.rfind("RMQAMQP.CONNECTION", 0) == 0) &&
+            ff.severity() < ball::Severity::e_WARN) {
+            return;
+        }
         const std::string_view msg = ff.message();
         const auto lvl = mapSeverity(ff.severity());
         const auto sevName = severityName(ff.severity());
@@ -192,6 +324,149 @@ ball::Severity::Level parseBallSeverity(const bsl::string& s)
     if (lower == "debug") return ball::Severity::e_DEBUG;
     return ball::Severity::e_TRACE;
 }
+
+opentelemetry::sdk::resource::Resource buildResource(const osmcli::ConnectionConfig& cfg)
+{
+    otel_resource::ResourceAttributes attrs;
+    attrs["service.name"] = std::string(cfg.otelServiceName.data(), cfg.otelServiceName.size());
+    if (!cfg.otelEnvironment.empty()) {
+        attrs["deployment.environment"] =
+            std::string(cfg.otelEnvironment.data(), cfg.otelEnvironment.size());
+    }
+    if (!cfg.vhost.empty()) {
+        attrs["messaging.rabbitmq.vhost"] =
+            std::string(cfg.vhost.data(), cfg.vhost.size());
+    }
+    return otel_resource::Resource::Create(attrs);
+}
+
+OtelContext initOtel(const osmcli::ConnectionConfig& cfg,
+                     quill::Logger* logger,
+                     const std::filesystem::path& resolvedLogDir)
+{
+    OtelContext ctx;
+    if (!cfg.enableOtel || !cfg.enableOtelExport) {
+        return ctx;
+    }
+    auto warn = [&](const std::string& msg) {
+        if (logger) {
+            QUILL_LOG_WARNING(logger, "otel disabled: {}", msg);
+        }
+    };
+    const std::string proto(cfg.otelProtocol.data(), cfg.otelProtocol.size());
+    if (proto != "grpc" && proto != "http" && proto != "file") {
+        warn("invalid otel_protocol (use grpc|http|file)");
+        return ctx;
+    }
+    if ((proto == "grpc" || proto == "http") && cfg.otelEndpoint.empty()) {
+        warn("otel_endpoint is required for grpc/http exporters");
+        return ctx;
+    }
+    if (proto == "http") {
+        const std::string ep(cfg.otelEndpoint.data(), cfg.otelEndpoint.size());
+        if (ep.rfind("http://", 0) != 0 && ep.rfind("https://", 0) != 0) {
+            warn("otel_endpoint for http should be a full URL");
+            return ctx;
+        }
+    }
+    std::filesystem::path fileExportPath;
+    if (proto == "file") {
+        if (!cfg.otelExportFile.empty()) {
+            fileExportPath = std::filesystem::path(
+                std::string(cfg.otelExportFile.data(), cfg.otelExportFile.size()));
+        }
+        else if (!resolvedLogDir.empty()) {
+            fileExportPath = resolvedLogDir / "otel_spans.ndjson";
+        }
+        if (fileExportPath.empty()) {
+            warn("otel protocol=file but no export path configured");
+            return ctx;
+        }
+    }
+    auto resource = buildResource(cfg);
+
+    if (cfg.enableOtelTraces) {
+        bool tracerInitialized = false;
+#if defined(OSMCLI_HAVE_OTEL_GRPC) && OSMCLI_HAVE_OTEL_GRPC
+        if (cfg.otelProtocol == "grpc") {
+            otel::exporter::otlp::OtlpGrpcExporterOptions opts;
+            opts.endpoint = std::string(cfg.otelEndpoint.data(), cfg.otelEndpoint.size());
+            opts.use_ssl_credentials = false;
+            auto exporter =
+                std::unique_ptr<otel_trace::SpanExporter>(
+                    new otel::exporter::otlp::OtlpGrpcExporter(opts));
+            otel_trace::BatchSpanProcessorOptions procOpts;
+            auto processor = std::unique_ptr<otel_trace::SpanProcessor>(
+                new otel_trace::BatchSpanProcessor(std::move(exporter), procOpts));
+            ctx.tracerProvider =
+                std::make_shared<otel_trace::TracerProvider>(std::move(processor), resource);
+            otel::trace::Provider::SetTracerProvider(ctx.tracerProvider);
+            tracerInitialized = true;
+        }
+#endif
+        if (!tracerInitialized && proto == "file") {
+            auto exporter = std::unique_ptr<otel_trace::SpanExporter>(
+                new FileSpanExporter(fileExportPath.string()));
+            otel_trace::BatchSpanProcessorOptions procOpts;
+            auto processor = std::unique_ptr<otel_trace::SpanProcessor>(
+                new otel_trace::BatchSpanProcessor(std::move(exporter), procOpts));
+            ctx.tracerProvider =
+                std::make_shared<otel_trace::TracerProvider>(std::move(processor), resource);
+            otel::trace::Provider::SetTracerProvider(ctx.tracerProvider);
+            tracerInitialized = true;
+        }
+        if (!tracerInitialized) {
+            otel::exporter::otlp::OtlpHttpExporterOptions opts;
+            opts.url = std::string(cfg.otelEndpoint.data(), cfg.otelEndpoint.size());
+            auto exporter =
+                std::unique_ptr<otel_trace::SpanExporter>(
+                    new otel::exporter::otlp::OtlpHttpExporter(opts));
+            otel_trace::BatchSpanProcessorOptions procOpts;
+            auto processor = std::unique_ptr<otel_trace::SpanProcessor>(
+                new otel_trace::BatchSpanProcessor(std::move(exporter), procOpts));
+            ctx.tracerProvider =
+                std::make_shared<otel_trace::TracerProvider>(std::move(processor), resource);
+            otel::trace::Provider::SetTracerProvider(ctx.tracerProvider);
+        }
+    }
+
+    if (cfg.enableOtelMetrics) {
+        if (proto == "file") {
+            if (logger) {
+                QUILL_LOG_WARNING(logger,
+                                  "otel protocol=file: metrics export not supported; skipping");
+            }
+            return ctx;
+        }
+#if defined(OSMCLI_HAVE_OTEL_GRPC) && OSMCLI_HAVE_OTEL_GRPC
+        otel::exporter::otlp::OtlpGrpcMetricExporterOptions opts;
+        opts.endpoint = std::string(cfg.otelEndpoint.data(), cfg.otelEndpoint.size());
+        opts.use_ssl_credentials = false;
+        auto metricExporter =
+            std::unique_ptr<otel_metrics::PushMetricExporter>(
+                new otel::exporter::otlp::OtlpGrpcMetricExporter(opts));
+#else
+        otel::exporter::otlp::OtlpHttpMetricExporterOptions opts;
+        opts.url = std::string(cfg.otelEndpoint.data(), cfg.otelEndpoint.size());
+        auto metricExporter =
+            std::unique_ptr<otel_metrics::PushMetricExporter>(
+                new otel::exporter::otlp::OtlpHttpMetricExporter(opts));
+#endif
+        otel_metrics::PeriodicExportingMetricReaderOptions readerOpts;
+        readerOpts.export_interval_millis = std::chrono::milliseconds(1000);
+        readerOpts.export_timeout_millis = std::chrono::milliseconds(1000);
+        auto reader = std::unique_ptr<otel_metrics::MetricReader>(
+            new otel_metrics::PeriodicExportingMetricReader(std::move(metricExporter),
+                                                            readerOpts));
+        auto mp = std::make_shared<otel_metrics::MeterProvider>();
+        mp->AddMetricReader(std::move(reader));
+        ctx.meterProvider = mp;
+        otel::metrics::Provider::SetMeterProvider(ctx.meterProvider);
+    }
+
+    return ctx;
+}
+#endif
 
 std::string basicAuthHeader(const std::string& user, const std::string& password)
 {
@@ -267,6 +542,14 @@ std::string httpGet(const osmcli::ConnectionConfig& cfg,
     }
 }
 
+std::string addPageParams(const std::string& base, int page, int pageSize)
+{
+    std::string out = base;
+    out += (base.find('?') == std::string::npos) ? "?" : "&";
+    out += "page=" + std::to_string(page) + "&page_size=" + std::to_string(pageSize);
+    return out;
+}
+
 template <class T>
 std::vector<T> parseArray(const std::string& json)
 {
@@ -279,7 +562,39 @@ std::vector<T> parseArray(const std::string& json)
     return out;
 }
 
-HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg)
+template <class T>
+std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
+                          const std::string& baseTarget,
+                          const std::string& authHeader,
+                          quill::Logger* logger,
+                          int pageSize = 500)
+{
+    std::vector<T> all;
+    int page = 1;
+    while (true) {
+        const std::string target = addPageParams(baseTarget, page, pageSize);
+        try {
+            auto chunk = parseArray<T>(httpGet(cfg, target, authHeader));
+            if (chunk.empty()) break;
+            all.insert(all.end(), chunk.begin(), chunk.end());
+            if (static_cast<int>(chunk.size()) < pageSize) break;
+        }
+        catch (const std::exception& ex) {
+            if (logger) {
+                QUILL_LOG_WARNING(logger,
+                                   "[http] pagination fetch failed for {}: {} (page={})",
+                                   target,
+                                   ex.what(),
+                                   page);
+            }
+            break;
+        }
+        ++page;
+    }
+    return all;
+}
+
+HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logger* logger)
 {
     HttpAdminSummary summary;
     const std::string user = cfg.httpAdminUser.empty()
@@ -295,12 +610,14 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg)
     summary.vhosts.reserve(vhostsObj.size());
     for (const auto& v : vhostsObj) summary.vhosts.emplace_back(v.name.data(), v.name.size());
 
-    summary.exchanges = parseArray<HttpExchange>(httpGet(cfg, "/api/exchanges", auth));
-    summary.queues = parseArray<HttpQueue>(
-        httpGet(cfg, "/api/queues?disable_stats=true&enable_queue_totals=true", auth));
-    summary.bindings = parseArray<HttpBinding>(httpGet(cfg, "/api/bindings", auth));
+    summary.exchanges =
+        fetchPaged<HttpExchange>(cfg, "/api/exchanges?disable_stats=true", auth, logger);
+    summary.queues = fetchPaged<HttpQueue>(
+        cfg, "/api/queues?disable_stats=true&enable_queue_totals=true", auth, logger);
+    summary.bindings = fetchPaged<HttpBinding>(cfg, "/api/bindings", auth, logger);
     try {
         const auto overviewJson = httpGet(cfg, "/api/overview", auth);
+        summary.overviewJson = overviewJson;
         HttpAdminSummary::Overview ov;
         constexpr auto opts = ::glz::opts{.error_on_unknown_keys = false};
         auto ec = ::glz::read<opts>(ov, overviewJson);
@@ -407,7 +724,21 @@ struct meta<osmcli_http::HttpAdminSummary> {
                "exchanges", &T::exchanges,
                "queues", &T::queues,
                "bindings", &T::bindings,
-               "overview", &T::overview);
+               "overview", &T::overview,
+               "skippedExclusive", &T::skippedExclusive,
+               "skippedAutoDelete", &T::skippedAutoDelete);
+};
+
+template <>
+struct meta<SpanJson> {
+    using T = SpanJson;
+    static constexpr auto value =
+        object("name", &T::name,
+               "trace_id", &T::trace_id,
+               "span_id", &T::span_id,
+               "parent_span_id", &T::parent_span_id,
+               "start_unix_nano", &T::start_unix_nano,
+               "end_unix_nano", &T::end_unix_nano);
 };
 }  // namespace glz
 
@@ -472,6 +803,24 @@ int main(int argc, char** argv)
         }
     }
     auto logger = quill::simple_logger(logTarget);
+    std::filesystem::path resolvedLogDir;
+    if (logTarget != "stdout" && logTarget != "stderr") {
+        resolvedLogDir = std::filesystem::path(logTarget).parent_path();
+    }
+
+#if OSMCLI_HAVE_OTEL
+    OtelContext otelCtx;
+    if (cfg.enableOtel) {
+        try {
+            otelCtx = initOtel(cfg, logger, resolvedLogDir);
+        }
+        catch (const std::exception& ex) {
+            QUILL_LOG_WARNING(logger,
+                               "failed to init OpenTelemetry (continuing without): {}",
+                               ex.what());
+        }
+    }
+#endif
 
     // Bridge rmqcpp's BALL logging into Quill to avoid UNINITIALIZED_LOGGER_MANAGER noise.
     ball::LoggerManagerConfiguration ballConfig;
@@ -489,7 +838,7 @@ int main(int argc, char** argv)
 
     if (cfg.enableHttpAdmin) {
         try {
-            auto httpSummary = fetchHttpAdmin(cfg);
+            auto httpSummary = fetchHttpAdmin(cfg, logger);
             if (!httpSummary.overview && !cfg.overviewCachePath.empty()) {
                 if (auto cached = loadOverviewCache(cfg.overviewCachePath)) {
                     httpSummary.overview = *cached;
@@ -555,6 +904,56 @@ int main(int argc, char** argv)
                                ov.object_totals.connections,
                                ov.object_totals.channels,
                                ov.object_totals.consumers);
+                std::filesystem::path overviewPath;
+                if (!cfg.overviewCachePath.empty()) {
+                    overviewPath = std::filesystem::path(
+                        std::string(cfg.overviewCachePath.data(), cfg.overviewCachePath.size()));
+                }
+                else if (!resolvedLogDir.empty()) {
+                    auto now = std::chrono::system_clock::now();
+                    const auto sec = std::chrono::time_point_cast<std::chrono::seconds>(now);
+                    const auto ns =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec).count();
+                    std::time_t tt = std::chrono::system_clock::to_time_t(sec);
+                    std::tm tm{};
+#if defined(_WIN32)
+                    localtime_s(&tm, &tt);
+#else
+                    localtime_r(&tt, &tm);
+#endif
+                    const auto timestamp =
+                        fmt::format("{:%Y%m%d.%H%M%S}.{:09d}", tm, static_cast<int>(ns));
+                    overviewPath = resolvedLogDir / fmt::format("http_overview-{}.json", timestamp);
+                }
+                if (!overviewPath.empty()) {
+                    try {
+                        if (overviewPath.has_parent_path()) {
+                            std::filesystem::create_directories(overviewPath.parent_path());
+                        }
+                        std::string body;
+                        if (!httpSummary.overviewJson.empty()) {
+                            body = httpSummary.overviewJson;
+                        }
+                        else {
+                            auto bodyExp = ::glz::write_json(*httpSummary.overview);
+                            if (!bodyExp) {
+                                throw std::runtime_error("failed to serialize overview JSON");
+                            }
+                            body = *bodyExp;
+                        }
+                        std::ofstream out(overviewPath);
+                        out << body;
+                        QUILL_LOG_INFO(logger,
+                                       "[http] wrote overview JSON to {}",
+                                       overviewPath.string());
+                    }
+                    catch (const std::exception& ex) {
+                        QUILL_LOG_WARNING(logger,
+                                          "[http] failed to write overview JSON to {}: {}",
+                                          overviewPath.string(),
+                                          ex.what());
+                    }
+                }
             }
 
             // Use live queue list from HTTP instead of stale definitions
@@ -589,6 +988,7 @@ int main(int argc, char** argv)
                 if (!skippedExclusive.empty()) {
                     const std::string skipped =
                         fmt::format("{}", fmt::join(skippedExclusive, ","));
+                    httpSummary.skippedExclusive = skippedExclusive;
                     QUILL_LOG_INFO(logger,
                                    "[http] skipped exclusive queues (not safe to attach consumers): {}",
                                    skipped);
@@ -596,6 +996,7 @@ int main(int argc, char** argv)
                 if (!skippedAutoDelete.empty()) {
                     const std::string skipped =
                         fmt::format("{}", fmt::join(skippedAutoDelete, ","));
+                    httpSummary.skippedAutoDelete = skippedAutoDelete;
                     QUILL_LOG_INFO(logger,
                                    "[http] skipped auto-delete queues (disabled via config): {}",
                                    skipped);
@@ -604,6 +1005,44 @@ int main(int argc, char** argv)
                 QUILL_LOG_ERROR(logger,
                                 "[http] no queues discovered for vhost={} (falling back to configured/definitions list)",
                                 std::string(cfg.vhost.data(), cfg.vhost.size()));
+            }
+
+            // Persist full HTTP summary to JSON for offline comparison.
+            if (!resolvedLogDir.empty()) {
+                auto now = std::chrono::system_clock::now();
+                const auto sec = std::chrono::time_point_cast<std::chrono::seconds>(now);
+                const auto ns =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec).count();
+                std::time_t tt = std::chrono::system_clock::to_time_t(sec);
+                std::tm tm{};
+#if defined(_WIN32)
+                localtime_s(&tm, &tt);
+#else
+                localtime_r(&tt, &tm);
+#endif
+                const auto timestamp =
+                    fmt::format("{:%Y%m%d.%H%M%S}.{:09d}", tm, static_cast<int>(ns));
+                std::filesystem::path summaryPath =
+                    resolvedLogDir / fmt::format("http_summary-{}.json", timestamp);
+                try {
+                    if (summaryPath.has_parent_path()) {
+                        std::filesystem::create_directories(summaryPath.parent_path());
+                    }
+                    auto jsonExp = ::glz::write_json(httpSummary);
+                    if (!jsonExp) {
+                        throw std::runtime_error("failed to serialize HTTP summary");
+                    }
+                    std::ofstream out(summaryPath);
+                    out << *jsonExp;
+                    QUILL_LOG_INFO(logger,
+                                   "[http] wrote full HTTP summary to {}",
+                                   summaryPath.string());
+                }
+                catch (const std::exception& ex) {
+                    QUILL_LOG_WARNING(logger,
+                                      "[http] failed to write HTTP summary: {}",
+                                      ex.what());
+                }
             }
         }
         catch (const std::exception& ex) {
@@ -657,16 +1096,34 @@ int main(int argc, char** argv)
                             std::string(cfg.definitionsJsonPath.data(), cfg.definitionsJsonPath.size()),
                             ex.what());
         }
+    } else if (cfg.enableHttpAdmin && !cfg.definitionsJsonPath.empty()) {
+        QUILL_LOG_WARNING(logger,
+                          "enable_http_admin=true: ignoring definitions_json={}",
+                          std::string(cfg.definitionsJsonPath.data(), cfg.definitionsJsonPath.size()));
     }
 
     try {
         App app;
         app.logger = logger;
+#if OSMCLI_HAVE_OTEL
+        if (cfg.enableOtel && otelCtx.tracerProvider) {
+            app.tracer = otelCtx.tracerProvider->GetTracer("order_status_monitor_cli");
+        }
+        if (cfg.enableOtel && otelCtx.meterProvider) {
+            app.meter = otelCtx.meterProvider->GetMeter("order_status_monitor_cli");
+            if (app.meter) {
+                app.counterMessages = app.meter->CreateUInt64Counter("osm.messages",
+                    "Messages consumed");
+                app.counterEnqueueFails = app.meter->CreateUInt64Counter("osm.enqueue.failures",
+                    "Consumer enqueue failures");
+            }
+        }
+#endif
         rmqa::RabbitContextOptions opts;
         // Single-threaded callback pool
         // Increase queue depth to avoid drop when consuming many queues.
         app.threadPool = bsl::make_unique<ThreadPool>(
-            ThreadAttributes(), 1, 1, 200000);
+            ThreadAttributes(), 1, 1, cfg.threadPoolQueueDepth);
         app.threadPool->start();
         opts.setThreadpool(app.threadPool.get());
         app.ctx = bsl::make_unique<rmqa::RabbitContext>(opts);
@@ -690,33 +1147,45 @@ int main(int argc, char** argv)
         rmqt::ConsumerConfig cconfig;
         cconfig.setPrefetchCount(cfg.prefetch);
 
-        // Create passive queues and consumers for each requested queue
-        for (const auto& qname : cfg.queues) {
-            // Per-queue callback to include queue name in logs
-            std::string qnameStd(qname.data(), qname.size());
-            auto onMessage = [logger, qnameStd](rmqp::MessageGuard& guard) {
-                const auto& msg = guard.message();
-                const auto& env = guard.envelope();
-                std::string exchange(env.exchange().data(),
-                                     env.exchange().size());
-                std::string routingKey(env.routingKey().data(),
-                                       env.routingKey().size());
-                QUILL_LOG_INFO(logger,
-                               "delivery tag={} exchange={} queue={} rk={} bytes={}",
-                               env.deliveryTag(),
-                               exchange,
-                               qnameStd,
-                               routingKey,
-                               msg.payloadSize());
-                guard.ack();
-            };
+            // Create passive queues and consumers for each requested queue
+            for (const auto& qname : cfg.queues) {
+                // Per-queue callback to include queue name in logs
+                std::string qnameStd(qname.data(), qname.size());
+                auto onMessage = [logger, &app, qnameStd](rmqp::MessageGuard& guard) {
+                    const auto& msg = guard.message();
+                    const auto& env = guard.envelope();
+                    std::string exchange(env.exchange().data(),
+                                         env.exchange().size());
+                    std::string routingKey(env.routingKey().data(),
+                                           env.routingKey().size());
+#if OSMCLI_HAVE_OTEL
+                    if (app.counterMessages) {
+                        app.counterMessages->Add(1, {{"queue", qnameStd}});
+                    }
+#endif
+                    app.messages.fetch_add(1, std::memory_order_relaxed);
+                    QUILL_LOG_INFO(logger,
+                                   "delivery tag={} exchange={} queue={} rk={} bytes={}",
+                                   env.deliveryTag(),
+                                   exchange,
+                                   qnameStd,
+                                   routingKey,
+                                   msg.payloadSize());
+                    guard.ack();
+                };
 
-            rmqa::Topology topology;
-            auto queue = topology.addPassiveQueue(qname);
+                rmqa::Topology topology;
+                auto queue = topology.addPassiveQueue(qname);
             auto consumerResult =
                 app.vhost->createConsumer(topology, queue, onMessage, cconfig);
             if (!consumerResult) {
                 const auto& err = consumerResult.error();
+                app.enqueueFailures.fetch_add(1, std::memory_order_relaxed);
+#if OSMCLI_HAVE_OTEL
+                if (app.counterEnqueueFails) {
+                    app.counterEnqueueFails->Add(1, {{"queue", qnameStd}});
+                }
+#endif
                 QUILL_LOG_ERROR(
                     logger,
                     "failed to create consumer queue={} vhost={} (consider refreshing definitions or enabling http admin): {}",
@@ -753,6 +1222,20 @@ int main(int argc, char** argv)
             });
         }
 
+        // Health summary logger (periodic)
+        std::atomic<bool> summaryStop{false};
+        std::unique_ptr<std::thread> summaryThread = std::make_unique<std::thread>([&] {
+            while (!summaryStop.load(std::memory_order_relaxed)) {
+                std::this_thread::sleep_for(std::chrono::seconds(10));
+                const auto msgs = app.messages.exchange(0);
+                const auto fails = app.enqueueFailures.exchange(0);
+                QUILL_LOG_INFO(logger,
+                               "[health] last 10s: messages={} enqueue_failures={}",
+                               msgs,
+                               fails);
+            }
+        });
+
         while (!stop.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
@@ -761,6 +1244,8 @@ int main(int argc, char** argv)
             c->cancel();
         }
         if (timerThread) timerThread->join();
+        summaryStop.store(true);
+        if (summaryThread) summaryThread->join();
         if (app.threadPool) {
             app.threadPool->stop();
         }

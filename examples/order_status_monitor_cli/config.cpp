@@ -42,6 +42,16 @@ struct JsonConfig {
     bsl::string logDir{"logs"};
     bsl::string logPrefix{"order_status_monitor"};
     bsl::string ballMinSeverity{"trace"};
+    std::uint32_t threadPoolQueueDepth{200000};
+    bool enableOtel{false};
+    bool enableOtelTraces{true};
+    bool enableOtelMetrics{true};
+    bool enableOtelExport{true};
+    bsl::string otelProtocol{"grpc"};
+    bsl::string otelEndpoint{"localhost:4317"};
+    bsl::string otelExportFile;
+    bsl::string otelServiceName{"order-status-monitor-cli"};
+    bsl::string otelEnvironment;
     bool enableHttpAdmin{false};
     bsl::string httpAdminUser;
     bsl::string httpAdminPassword;
@@ -83,6 +93,16 @@ struct glz::meta<osmcli::JsonConfig> {
         "log_dir", &T::logDir,
         "log_prefix", &T::logPrefix,
         "ball_min_severity", &T::ballMinSeverity,
+        "thread_pool_queue_depth", &T::threadPoolQueueDepth,
+        "enable_otel", &T::enableOtel,
+        "enable_otel_traces", &T::enableOtelTraces,
+        "enable_otel_metrics", &T::enableOtelMetrics,
+        "enable_otel_export", &T::enableOtelExport,
+        "otel_protocol", &T::otelProtocol,
+        "otel_endpoint", &T::otelEndpoint,
+        "otel_export_file", &T::otelExportFile,
+        "otel_service_name", &T::otelServiceName,
+        "otel_environment", &T::otelEnvironment,
         "enable_http_admin", &T::enableHttpAdmin,
         "http_admin_user", &T::httpAdminUser,
         "http_admin_password", &T::httpAdminPassword,
@@ -112,6 +132,17 @@ void applyEnvOverrides(ConnectionConfig& cfg)
     if (const char* v = std::getenv("MQ_LOG_DIR")) cfg.logDir = v;
     if (const char* v = std::getenv("MQ_LOG_PREFIX")) cfg.logPrefix = v;
     if (const char* v = std::getenv("BALL_MIN_SEVERITY")) cfg.ballMinSeverity = v;
+    if (const char* v = std::getenv("MQ_THREAD_POOL_QUEUE_DEPTH"))
+        cfg.threadPoolQueueDepth = static_cast<std::uint32_t>(std::atoi(v));
+    if (const char* v = std::getenv("OTEL_ENABLE")) cfg.enableOtel = std::atoi(v) != 0;
+    if (const char* v = std::getenv("OTEL_TRACES")) cfg.enableOtelTraces = std::atoi(v) != 0;
+    if (const char* v = std::getenv("OTEL_METRICS")) cfg.enableOtelMetrics = std::atoi(v) != 0;
+    if (const char* v = std::getenv("OTEL_EXPORT")) cfg.enableOtelExport = std::atoi(v) != 0;
+    if (const char* v = std::getenv("OTEL_PROTOCOL")) cfg.otelProtocol = v;
+    if (const char* v = std::getenv("OTEL_ENDPOINT")) cfg.otelEndpoint = v;
+    if (const char* v = std::getenv("OTEL_EXPORT_FILE")) cfg.otelExportFile = v;
+    if (const char* v = std::getenv("OTEL_SERVICE_NAME")) cfg.otelServiceName = v;
+    if (const char* v = std::getenv("OTEL_ENVIRONMENT")) cfg.otelEnvironment = v;
     if (const char* v = std::getenv("MQ_HTTP_ADMIN_ENABLE")) cfg.enableHttpAdmin = std::atoi(v) != 0;
     if (const char* v = std::getenv("MQ_HTTP_ADMIN_USER")) cfg.httpAdminUser = v;
     if (const char* v = std::getenv("MQ_HTTP_ADMIN_PASSWORD")) cfg.httpAdminPassword = v;
@@ -336,6 +367,18 @@ ConnectionConfig loadConfig(int argc, char** argv)
     app.add_option("--ball-min-severity",
                    cfg.ballMinSeverity,
                    "BALL->Quill minimum severity (trace|debug|info|warn|error|fatal)");
+    app.add_option("--thread-pool-queue-depth",
+                   cfg.threadPoolQueueDepth,
+                   "Thread pool queue depth for single-thread callback dispatcher");
+    app.add_flag("--enable-otel", cfg.enableOtel, "Enable OpenTelemetry export");
+    app.add_flag("--disable-otel-traces", cfg.enableOtelTraces, "Disable OpenTelemetry traces")
+        ->default_val(false);
+    app.add_flag("--disable-otel-metrics", cfg.enableOtelMetrics, "Disable OpenTelemetry metrics")
+        ->default_val(false);
+    app.add_option("--otel-protocol", cfg.otelProtocol, "OTLP protocol (grpc|http)");
+    app.add_option("--otel-endpoint", cfg.otelEndpoint, "OTLP collector endpoint (grpc host:port or http URL)");
+    app.add_option("--otel-service-name", cfg.otelServiceName, "OTel resource service.name");
+    app.add_option("--otel-environment", cfg.otelEnvironment, "OTel resource deployment.environment");
     app.add_flag("--enable-http-admin", cfg.enableHttpAdmin, "Enable RabbitMQ HTTP management polling");
     app.add_option("--http-admin-user", cfg.httpAdminUser, "HTTP admin username (defaults to AMQP username)");
     app.add_option("--http-admin-password", cfg.httpAdminPassword, "HTTP admin password (defaults to AMQP password)");
@@ -398,6 +441,14 @@ ConnectionConfig loadConfig(int argc, char** argv)
         if (!jc.logDir.empty()) cfg.logDir = jc.logDir;
         if (!jc.logPrefix.empty()) cfg.logPrefix = jc.logPrefix;
         if (!jc.ballMinSeverity.empty()) cfg.ballMinSeverity = jc.ballMinSeverity;
+        if (jc.threadPoolQueueDepth) cfg.threadPoolQueueDepth = jc.threadPoolQueueDepth;
+        cfg.enableOtel = jc.enableOtel;
+        cfg.enableOtelTraces = jc.enableOtelTraces;
+        cfg.enableOtelMetrics = jc.enableOtelMetrics;
+        if (!jc.otelProtocol.empty()) cfg.otelProtocol = jc.otelProtocol;
+        if (!jc.otelEndpoint.empty()) cfg.otelEndpoint = jc.otelEndpoint;
+        if (!jc.otelServiceName.empty()) cfg.otelServiceName = jc.otelServiceName;
+        if (!jc.otelEnvironment.empty()) cfg.otelEnvironment = jc.otelEnvironment;
         cfg.enableHttpAdmin = jc.enableHttpAdmin;
         if (!jc.httpAdminUser.empty()) cfg.httpAdminUser = jc.httpAdminUser;
         if (!jc.httpAdminPassword.empty()) cfg.httpAdminPassword = jc.httpAdminPassword;
