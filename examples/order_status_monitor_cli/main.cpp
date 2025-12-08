@@ -511,7 +511,8 @@ std::string basicAuthHeader(const std::string& user, const std::string& password
 
 std::string httpGet(const osmcli::ConnectionConfig& cfg,
                     const std::string& target,
-                    const std::string& authHeader)
+                    const std::string& authHeader,
+                    std::chrono::milliseconds timeout = std::chrono::milliseconds(15000))
 {
     asio::io_context ioc;
     const std::string host(cfg.host.data(), cfg.host.size());
@@ -527,6 +528,10 @@ std::string httpGet(const osmcli::ConnectionConfig& cfg,
         if (res.result() != http::status::ok) {
             throw std::runtime_error(fmt::format("HTTP {} {} for {}", res.result_int(), res.reason(), target));
         }
+    };
+
+    auto setDeadline = [&](auto& s) {
+        beast::get_lowest_layer(s).expires_after(timeout);
     };
 
     if (cfg.useTls) {
@@ -547,11 +552,13 @@ std::string httpGet(const osmcli::ConnectionConfig& cfg,
                 asio::error::get_ssl_category());
         }
         auto results = resolver.resolve(host, port);
+        setDeadline(stream);
         beast::get_lowest_layer(stream).connect(results);
         stream.handshake(ssl::stream_base::client);
         http::write(stream, req);
         beast::flat_buffer buffer;
         http::response<http::string_body> res;
+        setDeadline(stream);
         http::read(stream, buffer, res);
         beast::error_code ec;
         stream.shutdown(ec);
@@ -562,10 +569,12 @@ std::string httpGet(const osmcli::ConnectionConfig& cfg,
         tcp::resolver resolver(ioc);
         beast::tcp_stream stream{ioc};
         auto results = resolver.resolve(host, port);
+        setDeadline(stream);
         stream.connect(results);
         http::write(stream, req);
         beast::flat_buffer buffer;
         http::response<http::string_body> res;
+        setDeadline(stream);
         http::read(stream, buffer, res);
         stream.socket().shutdown(tcp::socket::shutdown_both);
         checkStatus(res);
@@ -610,19 +619,24 @@ std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
     int page = 1;
     while (true) {
         const std::string target = addPageParams(baseTarget, page, pageSize);
+        std::string body;
         try {
-            auto chunk = parseArray<T>(httpGet(cfg, target, authHeader));
+            body = httpGet(cfg, target, authHeader);
+            auto chunk = parseArray<T>(body);
             if (chunk.empty()) break;
             all.insert(all.end(), chunk.begin(), chunk.end());
             if (static_cast<int>(chunk.size()) < pageSize) break;
         }
         catch (const std::exception& ex) {
             if (logger) {
+                std::string snippet = body;
+                if (snippet.size() > 256) snippet = snippet.substr(0, 256);
                 QUILL_LOG_WARNING(logger,
-                                   "[http] pagination fetch failed for {}: {} (page={})",
+                                   "[http] pagination fetch failed for {}: {} (page={}) body_snippet='{}'",
                                    target,
                                    ex.what(),
-                                   page);
+                                   page,
+                                   snippet);
             }
             break;
         }
