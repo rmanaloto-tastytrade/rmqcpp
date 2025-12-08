@@ -1,4 +1,5 @@
 #include "config.h"
+#include "../../MonitorUtil.hpp"
 
 #include <rmqa_rabbitcontext.h>
 #include <rmqa_vhost.h>
@@ -312,6 +313,19 @@ class QuillBallObserver : public ball::Observer {
         if (severity >= S::e_TRACE) return "TRACE";
         return "DEBUG";
     }
+};
+
+template <typename F>
+class ScopeExit {
+  public:
+    explicit ScopeExit(F&& f) : f_(std::move(f)), active_(true) {}
+    ScopeExit(const ScopeExit&) = delete;
+    ScopeExit& operator=(const ScopeExit&) = delete;
+    ScopeExit(ScopeExit&& other) noexcept : f_(std::move(other.f_)), active_(other.active_) { other.active_ = false; }
+    ~ScopeExit() { if (active_) f_(); }
+  private:
+    F f_;
+    bool active_;
 };
 
 ball::Severity::Level parseBallSeverity(const bsl::string& s)
@@ -1181,6 +1195,26 @@ int main(int argc, char** argv)
                                          env.exchange().size());
                     std::string routingKey(env.routingKey().data(),
                                            env.routingKey().size());
+                    const auto entrySteady = std::chrono::steady_clock::now();
+                    const auto entryReal = std::chrono::system_clock::now();
+                    const std::uint64_t entryTsc = TW::getTSC();
+                    ScopeExit exitGuard([&] {
+                        const auto exitSteady = std::chrono::steady_clock::now();
+                        const auto exitReal = std::chrono::system_clock::now();
+                        const std::uint64_t exitTsc = TW::getTSC();
+                        const auto durNs =
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(exitSteady - entrySteady).count();
+                        QUILL_LOG_DEBUG(logger,
+                                        "[latency] queue={} dt_ns={} tsc_entry={} tsc_exit={} real_entry={} real_exit={}",
+                                        qnameStd,
+                                        durNs,
+                                        entryTsc,
+                                        exitTsc,
+                                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                            entryReal.time_since_epoch()).count(),
+                                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                            exitReal.time_since_epoch()).count());
+                    });
 #if OSMCLI_HAVE_OTEL
                     if (app.counterMessages) {
                         app.counterMessages->Add(1, {{"queue", qnameStd}});
