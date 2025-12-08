@@ -12,6 +12,10 @@
       "zstd",
       "quill",
       "glaze",
-      "fmt"
+      "fmt",
+      {
+        "name": "opentelemetry-cpp",
+        "features": [ "otlp-http" ]
+      }
     ]
   }
