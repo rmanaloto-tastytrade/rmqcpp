@@ -47,6 +47,7 @@ For each point, record:
 3. Replace/augment the read path with a `recvmsg` helper to extract the control message timestamp; store alongside the payload before rmqcpp processes it.
 4. Stamp the two in-process times (receive start, handler done) using `clock_gettime` and cycle counter helper.
 5. Emit to OTel spans/metrics; log to file for debugging when OTEL is disabled.
+6. Current status: in-process entry/exit timestamps are captured in the consumer callback; socket-buffer timestamps still TODO (requires rmqcpp I/O hook or native recvmsg path).
 
 ## Open questions / tasks
 - Verify macOS TCP timestamping behavior; if unreliable, document and disable kernel timestamps there.
