@@ -63,3 +63,19 @@
 - Neither Perfetto nor Tracy provide a public API to hand out their internal timestamp source. Both rely on platform monotonic clocks (Perfetto) or rdtsc/rdtscp plus clocks (Tracy).
 - Our TW::getTSC matches these sources: rdtscp on x86, cntvct_el0 on AArch64, mach_absolute_time on macOS, steady_clock fallback.
 - If we integrate Perfetto/Tracy later, we should keep TW::getTSC aligned to the same platform clocks rather than trying to call into their internals.
+
+## Aggregating per-message latency by exchange/queue/binding (minimal overhead)
+- **Primary (out-of-process) path**: OpenTelemetry metrics/traces.
+  - Emit a histogram metric per binding/queue/exchange (labels: `queue`, `exchange`, optionally `binding_key`) with the handler duration (ns). OTLP export to a collector gives min/max/avg/p50/p99 outside the process.
+  - Emit span events or attributes with the same labels if traces are desired.
+  - Overhead is low if using a histogram and batching; can be toggled off via config.
+- **Optional profiling**:
+  - Tracy: add zones around handler; Tracy server shows min/max/avg per zone. Good for dev profiling; not ideal for always-on prod.
+  - Perfetto: add trace events around handler; can aggregate in Perfetto UI for p50/p99. Heavier, more suited to deep profiling.
+- **In-process vs out-of-process**:
+  - Prefer out-of-process aggregation (OTel collector) to keep overhead down and allow long-lived stats (min/max/avg/rolling).
+  - In-process rolling stats (min/max/avg/EMA) are easy to add but risk memory/CPU overhead at high volume; keep optional.
+- **Libraries/ports in vcpkg**:
+  - OpenTelemetry C++ (already wired) for histograms/spans.
+  - Tracy (vcpkg `tracy`) for dev profiling; requires running the Tracy server.
+  - Perfetto (vcpkg `perfetto`) for deep Linux tracing; heavier and better suited for profiling sessions.
