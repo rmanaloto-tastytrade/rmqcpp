@@ -1198,6 +1198,30 @@ int main(int argc, char** argv)
                     const auto entrySteady = std::chrono::steady_clock::now();
                     const std::uint64_t entryRealNs = TW::getRealtimeNs();
                     const std::uint64_t entryTsc = TW::getTSC();
+                    const auto writeLatencySample = [&](std::optional<std::uint64_t> socketTsNs = std::nullopt) {
+                        if (resolvedLogDir.empty()) return;
+                        std::filesystem::path latPath = resolvedLogDir / "latency_samples.ndjson";
+                        try {
+                            if (latPath.has_parent_path()) {
+                                std::filesystem::create_directories(latPath.parent_path());
+                            }
+                            std::ofstream out(latPath, std::ios::app);
+                            out << "{";
+                            out << "\"queue\":\"" << qnameStd << "\",";
+                            out << "\"duration_ns\":" << durNs << ",";
+                            out << "\"tsc_entry\":" << entryTsc << ",";
+                            out << "\"tsc_exit\":" << exitTsc << ",";
+                            out << "\"real_entry_ns\":" << entryRealNs << ",";
+                            out << "\"real_exit_ns\":" << exitRealNs;
+                            if (socketTsNs) {
+                                out << ",\"socket_timestamp_ns\":" << *socketTsNs;
+                            }
+                            out << "}\n";
+                        }
+                        catch (const std::exception& ex) {
+                            QUILL_LOG_WARNING(logger, "failed to write latency sample: {}", ex.what());
+                        }
+                    };
                     ScopeExit exitGuard([&] {
                         const auto exitSteady = std::chrono::steady_clock::now();
                         const std::uint64_t exitRealNs = TW::getRealtimeNs();
@@ -1212,6 +1236,7 @@ int main(int argc, char** argv)
                                         exitTsc,
                                         entryRealNs,
                                         exitRealNs);
+                        writeLatencySample();
                     });
 #if OSMCLI_HAVE_OTEL
                     if (app.counterMessages) {
