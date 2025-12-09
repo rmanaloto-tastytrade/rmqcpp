@@ -52,7 +52,7 @@ Selected list methods from `src/blocking_api`:
 - Vhosts: supported (matches).
 - Exchanges: per-vhost list with `disable_stats=true` (matches).
 - Queues: per-vhost list with `disable_stats=true&enable_queue_totals=true` (matches intent; rabbitmqadmin-ng does not add flags explicitly).
-- Bindings: rabbitmqadmin-ng uses global `/api/bindings` via `list_bindings`; our CLI now does the same (single call, no explicit pagination flags, errors logged).
+- Bindings: rabbitmqadmin-ng uses global `/api/bindings` via `list_bindings`; our CLI now does the same (single call, no explicit pagination flags, errors logged; latest run fetched ~1360 bindings).
 - Other endpoints (connections/channels/consumers/policies/users/limits/feature-flags/parameters/deprecations/shovels/federation/streams/nodes/plugins): rabbitmqadmin-ng exposes them; our CLI does **not** crawl or expose them yet.
 - Definitions export: available via management API and rabbitmqadmin-ng; our CLI can read a definitions JSON if provided but prefers live crawl when enabled.
 
