@@ -293,6 +293,103 @@ struct LatencyStats {
     double sum_ns{0.0};
     double sum_sq_ns{0.0};
 
+    struct P2Quantile {
+        double q;
+        bool initialized{false};
+        std::array<double, 5> h{};
+        std::array<double, 5> n{};
+        std::array<double, 5> np{};
+        std::array<double, 5> dn{};
+
+        explicit P2Quantile(double quant) : q(quant)
+        {
+            dn = {0.0, q / 2.0, q, (1.0 + q) / 2.0, 1.0};
+        }
+
+        void add(double x)
+        {
+            if (!initialized) {
+                initSample(x);
+                return;
+            }
+            // Find cell k
+            int k = 0;
+            if (x < h[0]) {
+                h[0] = x;
+                k = 0;
+            }
+            else if (x < h[1]) k = 0;
+            else if (x < h[2]) k = 1;
+            else if (x < h[3]) k = 2;
+            else if (x <= h[4]) k = 3;
+            else {
+                h[4] = x;
+                k = 3;
+            }
+            for (int i = k + 1; i < 5; ++i) n[i] += 1.0;
+            for (int i = 0; i < 5; ++i) np[i] += dn[i];
+            adjust();
+        }
+
+        std::optional<double> estimate() const
+        {
+            if (!initialized) return std::nullopt;
+            return h[2];
+        }
+
+      private:
+        std::vector<double> seed{};
+
+        void initSample(double x)
+        {
+            seed.push_back(x);
+            if (seed.size() == 5) {
+                std::sort(seed.begin(), seed.end());
+                for (int i = 0; i < 5; ++i) {
+                    h[i] = seed[i];
+                    n[i] = i + 1;
+                    np[i] = 1.0 + dn[i] * (seed.size() - 1);
+                }
+                initialized = true;
+                seed.clear();
+            }
+        }
+
+        void adjust()
+        {
+            for (int i = 1; i < 4; ++i) {
+                const double d = np[i] - n[i];
+                if ((d >= 1.0 && (n[i + 1] - n[i]) > 1.0) ||
+                    (d <= -1.0 && (n[i - 1] - n[i]) < -1.0)) {
+                    const int sign = (d >= 0.0) ? 1 : -1;
+                    const double hp = parabolic(i, sign);
+                    if (h[i - 1] < hp && hp < h[i + 1]) {
+                        h[i] = hp;
+                    }
+                    else {
+                        h[i] = linear(i, sign);
+                    }
+                    n[i] += sign;
+                }
+            }
+        }
+
+        double parabolic(int i, int d) const
+        {
+            return h[i] + d * (n[i] - n[i - 1] + d) * (h[i + 1] - h[i]) / (n[i + 1] - n[i]) +
+                   d * (n[i + 1] - n[i] - d) * (h[i] - h[i - 1]) / (n[i] - n[i - 1]);
+        }
+
+        double linear(int i, int d) const
+        {
+            return h[i] + d * (h[i + d] - h[i]) / (n[i + d] - n[i]);
+        }
+    };
+
+    P2Quantile p50{0.5};
+    P2Quantile p90{0.9};
+    P2Quantile p99{0.99};
+
     void add(std::int64_t dur)
     {
         ++count;
@@ -300,6 +397,9 @@ struct LatencyStats {
         max_ns = std::max(max_ns, dur);
         sum_ns += static_cast<double>(dur);
         sum_sq_ns += static_cast<double>(dur) * static_cast<double>(dur);
+        p50.add(static_cast<double>(dur));
+        p90.add(static_cast<double>(dur));
+        p99.add(static_cast<double>(dur));
     }
 
     std::optional<double> mean() const
@@ -313,7 +413,7 @@ struct LatencyStats {
         if (count == 0) return std::nullopt;
         const auto m = sum_ns / static_cast<double>(count);
         const auto variance = (sum_sq_ns / static_cast<double>(count)) - (m * m);
-        return variance > 0 ? std::sqrt(variance) : 0.0L;
+        return variance > 0 ? std::sqrt(variance) : 0.0;
     }
 };
 struct LatencySummary {
@@ -1201,7 +1301,10 @@ struct meta<LatencyStats> {
                "min_ns", &T::min_ns,
                "max_ns", &T::max_ns,
                "mean_ns", [](auto& t) { return t.mean().value_or(0); },
-               "stddev_ns", [](auto& t) { return t.stddev().value_or(0); });
+               "stddev_ns", [](auto& t) { return t.stddev().value_or(0); },
+               "p50_ns", [](auto& t) { return t.p50.estimate().value_or(0); },
+               "p90_ns", [](auto& t) { return t.p90.estimate().value_or(0); },
+               "p99_ns", [](auto& t) { return t.p99.estimate().value_or(0); });
 };
 template <>
 struct meta<LatencySummary> {
