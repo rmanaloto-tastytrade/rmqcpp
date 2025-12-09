@@ -657,8 +657,16 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
                                  : std::string(cfg.httpAdminPassword.data(), cfg.httpAdminPassword.size());
     const std::string auth = basicAuthHeader(user, pass);
 
+    auto logStart = [&](const char* what) {
+        if (logger) QUILL_LOG_INFO(logger, "[http] start {}", what);
+    };
+    auto logDone = [&](const char* what) {
+        if (logger) QUILL_LOG_INFO(logger, "[http] done {}", what);
+    };
+
     try {
-        const auto overviewJson = httpGet(cfg, "/api/overview", auth);
+        logStart("/api/overview");
+        const auto overviewJson = httpGet(cfg, "/api/overview", auth, std::chrono::milliseconds(15000), logger);
         summary.overviewJson = overviewJson;
         HttpAdminSummary::Overview ov;
         constexpr auto opts = ::glz::opts{.error_on_unknown_keys = false};
@@ -666,20 +674,31 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
         if (!ec) {
             summary.overview = ov;
         }
+        logDone("/api/overview");
     }
     catch (const std::exception&) {
         summary.overview = std::nullopt;
     }
-    const auto vhostsJson = httpGet(cfg, "/api/vhosts", auth);
+    logStart("/api/vhosts");
+    const auto vhostsJson = httpGet(cfg, "/api/vhosts", auth, std::chrono::milliseconds(15000), logger);
     auto vhostsObj = parseArray<HttpVhost>(vhostsJson);
     summary.vhosts.reserve(vhostsObj.size());
     for (const auto& v : vhostsObj) summary.vhosts.emplace_back(v.name.data(), v.name.size());
+    logDone("/api/vhosts");
 
+    logStart("/api/exchanges");
     summary.exchanges =
         fetchPaged<HttpExchange>(cfg, "/api/exchanges?disable_stats=true", auth, logger);
+    logDone("/api/exchanges");
+
+    logStart("/api/queues");
     summary.queues = fetchPaged<HttpQueue>(
         cfg, "/api/queues?disable_stats=true&enable_queue_totals=true", auth, logger);
+    logDone("/api/queues");
+
+    logStart("/api/bindings");
     summary.bindings = fetchPaged<HttpBinding>(cfg, "/api/bindings", auth, logger);
+    logDone("/api/bindings");
     return summary;
 }
 

@@ -19,6 +19,16 @@ if (ENABLE_COMPRESSION)
     target_link_libraries(rmq PUBLIC zstd::libzstd_static)
 endif()
 
+# On macOS, strip any Linux-only link flags that may leak in via upstream
+# interfaces (e.g., bde exports) so we don't try to link 'rt'/'stdc++'.
+if(APPLE)
+    get_target_property(_rmq_links rmq LINK_LIBRARIES)
+    if(_rmq_links)
+        list(FILTER _rmq_links EXCLUDE REGEX "rt|stdc\\+\\+")
+        set_target_properties(rmq PROPERTIES LINK_LIBRARIES "${_rmq_links}")
+    endif()
+endif()
+
 get_target_property(OPENSSL_TARGET_TYPE OpenSSL::SSL TYPE)
 if(OPENSSL_CRYPTO_LIBRARY MATCHES "\\.a$")
     target_compile_definitions(rmq PUBLIC WITH_STATIC_LIB_libcrypto)

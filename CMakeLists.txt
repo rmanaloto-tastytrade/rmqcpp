@@ -29,11 +29,17 @@ if(DEFINED BDE_BUILD_TARGET_SAFE)
 endif()
 
 # C++20+ removes several deprecated std symbols that older BDE releases still
-# alias. Guard them out explicitly for C++23/C++26 builds.
+# alias. Guard them out explicitly for C++23/C++26 builds, and force-include
+# <new>/<cstdlib> to paper over missing includes in the current BDE drop when
+# building with libc++ and C++26.
 if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
     add_compile_definitions(
         BSLS_LIBRARYFEATURES_HAS_CPP17_DEPRECATED_REMOVED
-        BSLS_LIBRARYFEATURES_HAS_CPP20_DEPRECATED_REMOVED)
+        BSLS_LIBRARYFEATURES_HAS_CPP20_DEPRECATED_REMOVED
+        # Force BDE's linker guard to match the prebuilt libs (compiled with a
+        # C++17 baseline) even when we build with newer language modes.
+        BSLS_LIBRARYFEATURES_HAS_CPP17_BASELINE_LIBRARY)
+    add_compile_options(-include new)
 endif()
 
 # Fail fast if libc++ is not in use when requested by the preset flags.

@@ -54,7 +54,10 @@
       "binaryDir": "${sourceDir}/cmake-out/macos-arm64-vcpkg-llvm-26",
       "installDir": "${sourceDir}/cmake-out/macos-arm64-vcpkg-llvm-26/install",
       "environment": {
-        "VCPKG_ROOT": "$env{HOME}/dev/tmp/vcpkg"
+        "VCPKG_ROOT": "$env{HOME}/dev/tmp/vcpkg",
+        "VCPKG_BUILD_TYPE": "release",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg-overlays",
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/llvm-macos.cmake"
       },
       "cacheVariables": {
         "VCPKG_INSTALL_OPTIONS": "--allow-unsupported",

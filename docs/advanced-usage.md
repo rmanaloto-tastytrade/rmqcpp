@@ -4,6 +4,9 @@ See also: [`docs/libraries.md`](./libraries.md) for package links and the per-li
 
 Guidance for squeezing the most out of `rmqcpp`, with emphasis on single-threaded, allocation-aware, and lock-minimized setups that share a [`Boost.Asio`](https://github.com/boostorg/asio) [`io_context`](https://www.boost.org/doc/libs/latest/doc/html/boost_asio.html) (including io_uring builds).
 
+## macOS build note (BDE)
+- The BDE CMake exports inject `-lrt`/`-lstdc++` into `bslTargets.cmake`, which does not exist on macOS. Our vcpkg BDE overlay strips those flags after install; keep the overlay enabled (via `configuration.overlay-ports: ["vcpkg-overlays"]` in `vcpkg.json`) when building on macOS.
+
 ## Single-Threaded Event Loop
 - Keep the default `rmqio::AsioEventLoop` single-threaded; run your other Asio work (epoll/kqueue/io_uring descriptors, timers, sockets, REST clients) on the same `io_context` via `AsioEventLoop::context()`.
 - Pin the event loop thread to a dedicated core if you want predictable latency; avoid binding other CPU-heavy work to that core.
