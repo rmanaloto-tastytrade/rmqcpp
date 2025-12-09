@@ -583,6 +583,17 @@ std::string httpGet(const osmcli::ConnectionConfig& cfg,
     }
 }
 
+void httpGet(const osmcli::ConnectionConfig& cfg,
+             const std::string& target,
+             const std::string& authHeader,
+             std::chrono::milliseconds timeout,
+             quill::Logger* logger,
+             std::string& outBody)
+{
+    outBody.clear();
+    outBody = httpGet(cfg, target, authHeader, timeout, logger);
+}
+
 std::string addPageParams(const std::string& base, int page, int pageSize)
 {
     std::string out = base;
@@ -591,14 +602,30 @@ std::string addPageParams(const std::string& base, int page, int pageSize)
     return out;
 }
 
-template <class T>
-std::vector<T> parseArray(const std::string& json)
+std::string encodePathSegment(const std::string& segment)
 {
-    std::vector<T> out;
+    // Minimal percent-encoding for vhost names we see (slash and space).
+    std::string out;
+    out.reserve(segment.size() * 3);
+    for (char c : segment) {
+        switch (c) {
+        case '/': out += "%2F"; break;
+        case ' ': out += "%20"; break;
+        default: out.push_back(c); break;
+        }
+    }
+    if (out.empty()) return "%2F";
+    return out;
+}
+
+template <class T>
+void parseArrayInto(const std::string& json, std::vector<T>& out)
+{
+    out.clear();
     constexpr auto opts = ::glz::opts{.error_on_unknown_keys = false};
     auto ec = ::glz::read<opts>(out, json);
     if (!ec) {
-        return out;
+        return;
     }
     // Try paged envelope: { "items": [...] }
     osmcli_http::PagedResponse<T> paged;
@@ -606,31 +633,40 @@ std::vector<T> parseArray(const std::string& json)
     if (ec2) {
         throw std::runtime_error("Failed to parse HTTP response: " + ::glz::format_error(ec2, json));
     }
-    return paged.items;
+    out = std::move(paged.items);
 }
+
+template <class T>
+struct PageScratch {
+    std::string body;
+    std::vector<T> chunk;
+};
 
 template <class T>
 std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
                           const std::string& baseTarget,
                           const std::string& authHeader,
                           quill::Logger* logger,
-                          int pageSize = 500)
+                          int pageSize = 500,
+                          PageScratch<T>* scratch = nullptr)
 {
+    PageScratch<T> local;
+    PageScratch<T>* buf = scratch ? scratch : &local;
     std::vector<T> all;
     int page = 1;
     while (true) {
         const std::string target = addPageParams(baseTarget, page, pageSize);
-        std::string body;
         try {
-            body = httpGet(cfg, target, authHeader, std::chrono::milliseconds(15000), logger);
-            auto chunk = parseArray<T>(body);
-            if (chunk.empty()) break;
-            all.insert(all.end(), chunk.begin(), chunk.end());
-            if (static_cast<int>(chunk.size()) < pageSize) break;
+            httpGet(cfg, target, authHeader, std::chrono::milliseconds(15000), logger, buf->body);
+            parseArrayInto<T>(buf->body, buf->chunk);
+            if (buf->chunk.empty()) break;
+            all.reserve(all.size() + buf->chunk.size());
+            all.insert(all.end(), buf->chunk.begin(), buf->chunk.end());
+            if (static_cast<int>(buf->chunk.size()) < pageSize) break;
         }
         catch (const std::exception& ex) {
             if (logger) {
-                std::string snippet = body;
+                std::string snippet = buf->body;
                 if (snippet.size() > 256) snippet = snippet.substr(0, 256);
                 QUILL_LOG_WARNING(logger,
                                    "[http] pagination fetch failed for {}: {} (page={}) body_snippet='{}'",
@@ -686,19 +722,45 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
     for (const auto& v : vhostsObj) summary.vhosts.emplace_back(v.name.data(), v.name.size());
     logDone("/api/vhosts");
 
-    logStart("/api/exchanges");
-    summary.exchanges =
-        fetchPaged<HttpExchange>(cfg, "/api/exchanges?disable_stats=true", auth, logger);
-    logDone("/api/exchanges");
+    logStart("/api/exchanges (per vhost)");
+    PageScratch<HttpExchange> exchScratch;
+    for (const auto& v : summary.vhosts) {
+        const auto encoded = encodePathSegment(v);
+        const std::string base = "/api/exchanges/" + encoded + "?disable_stats=true";
+        auto chunk = fetchPaged<HttpExchange>(cfg, base, auth, logger, 500, &exchScratch);
+        if (logger) {
+            QUILL_LOG_INFO(logger, "[http] {}: fetched {} exchanges", base, chunk.size());
+        }
+        summary.exchanges.insert(summary.exchanges.end(), chunk.begin(), chunk.end());
+    }
+    logDone("/api/exchanges (per vhost)");
 
-    logStart("/api/queues");
-    summary.queues = fetchPaged<HttpQueue>(
-        cfg, "/api/queues?disable_stats=true&enable_queue_totals=true", auth, logger);
-    logDone("/api/queues");
+    logStart("/api/queues (per vhost)");
+    PageScratch<HttpQueue> queueScratch;
+    for (const auto& v : summary.vhosts) {
+        const auto encoded = encodePathSegment(v);
+        const std::string base =
+            "/api/queues/" + encoded + "?disable_stats=true&enable_queue_totals=true";
+        auto chunk = fetchPaged<HttpQueue>(cfg, base, auth, logger, 500, &queueScratch);
+        if (logger) {
+            QUILL_LOG_INFO(logger, "[http] {}: fetched {} queues", base, chunk.size());
+        }
+        summary.queues.insert(summary.queues.end(), chunk.begin(), chunk.end());
+    }
+    logDone("/api/queues (per vhost)");
 
-    logStart("/api/bindings");
-    summary.bindings = fetchPaged<HttpBinding>(cfg, "/api/bindings", auth, logger);
-    logDone("/api/bindings");
+    logStart("/api/bindings (per vhost)");
+    PageScratch<HttpBinding> bindScratch;
+    for (const auto& v : summary.vhosts) {
+        const auto encoded = encodePathSegment(v);
+        const std::string base = "/api/bindings/" + encoded;
+        auto chunk = fetchPaged<HttpBinding>(cfg, base, auth, logger, 500, &bindScratch);
+        if (logger) {
+            QUILL_LOG_INFO(logger, "[http] {}: fetched {} bindings", base, chunk.size());
+        }
+        summary.bindings.insert(summary.bindings.end(), chunk.begin(), chunk.end());
+    }
+    logDone("/api/bindings (per vhost)");
     return summary;
 }
 
