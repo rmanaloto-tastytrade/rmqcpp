@@ -286,6 +286,40 @@ struct LatencySample {
     std::uint64_t real_exit_ns{};
     std::optional<std::uint64_t> socket_ts_ns;
 };
+struct LatencyStats {
+    std::uint64_t count{0};
+    std::int64_t min_ns{std::numeric_limits<std::int64_t>::max()};
+    std::int64_t max_ns{0};
+    double sum_ns{0.0};
+    double sum_sq_ns{0.0};
+
+    void add(std::int64_t dur)
+    {
+        ++count;
+        min_ns = std::min(min_ns, dur);
+        max_ns = std::max(max_ns, dur);
+        sum_ns += static_cast<double>(dur);
+        sum_sq_ns += static_cast<double>(dur) * static_cast<double>(dur);
+    }
+
+    std::optional<double> mean() const
+    {
+        if (count == 0) return std::nullopt;
+        return sum_ns / static_cast<double>(count);
+    }
+
+    std::optional<double> stddev() const
+    {
+        if (count == 0) return std::nullopt;
+        const auto m = sum_ns / static_cast<double>(count);
+        const auto variance = (sum_sq_ns / static_cast<double>(count)) - (m * m);
+        return variance > 0 ? std::sqrt(variance) : 0.0L;
+    }
+};
+struct LatencySummary {
+    LatencyStats overall;
+    std::unordered_map<std::string, LatencyStats> per_queue;
+};
 }  // namespace osmcli_http
 
 namespace {
@@ -318,6 +352,7 @@ struct App {
     bsl::vector<bsl::shared_ptr<rmqa::Consumer> > consumers;
     quill::Logger* logger{nullptr};
     std::string jsonScratch;
+    LatencySummary latencySummary;
 #if OSMCLI_HAVE_OTEL
     otel_nostd::shared_ptr<opentelemetry::trace::Tracer> tracer;
     otel_nostd::shared_ptr<opentelemetry::metrics::Meter> meter;
@@ -1158,6 +1193,23 @@ struct meta<LatencySample> {
                "real_exit_ns", &T::real_exit_ns,
                "socket_timestamp_ns", &T::socket_ts_ns);
 };
+template <>
+struct meta<LatencyStats> {
+    using T = LatencyStats;
+    static constexpr auto value =
+        object("count", &T::count,
+               "min_ns", &T::min_ns,
+               "max_ns", &T::max_ns,
+               "mean_ns", [](auto& t) { return t.mean().value_or(0); },
+               "stddev_ns", [](auto& t) { return t.stddev().value_or(0); });
+};
+template <>
+struct meta<LatencySummary> {
+    using T = LatencySummary;
+    static constexpr auto value =
+        object("overall", &T::overall,
+               "per_queue", &T::per_queue);
+};
 
 template <>
 struct meta<SpanJson> {
@@ -1686,6 +1738,8 @@ int main(int argc, char** argv)
                                         entryRealNs,
                                         exitRealNs);
                         writeLatencySample(durNs, exitTsc, exitRealNs);
+                        app.latencySummary.overall.add(durNs);
+                        app.latencySummary.per_queue[qnameStd].add(durNs);
                     });
 #if OSMCLI_HAVE_OTEL
                     if (app.counterMessages) {
@@ -1778,10 +1832,27 @@ int main(int argc, char** argv)
         if (app.threadPool) {
             app.threadPool->stop();
         }
+        // Emit latency summary JSON
+        if (!resolvedLogDir.empty()) {
+            std::filesystem::path summaryPath =
+                resolvedLogDir / fmt::format("latency_summary-{}.json", runStamp);
+            try {
+                auto jsonExp = ::glz::write_json(app.latencySummary);
+                if (jsonExp) {
+                    std::ofstream out(summaryPath, std::ios::binary);
+                    out << *jsonExp;
+                    QUILL_LOG_INFO(logger, "[latency] wrote summary {}", summaryPath.string());
+                }
+            }
+            catch (const std::exception& ex) {
+                QUILL_LOG_WARNING(logger, "[latency] failed to write summary: {}", ex.what());
+            }
+        }
     }
     catch (const std::exception& ex) {
         QUILL_LOG_ERROR(logger, "fatal: {}", ex.what());
         return 1;
     }
+
     return 0;
 }
