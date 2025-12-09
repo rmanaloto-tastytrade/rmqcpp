@@ -254,6 +254,7 @@ struct App {
     bsl::shared_ptr<rmqa::VHost> vhost;
     bsl::vector<bsl::shared_ptr<rmqa::Consumer> > consumers;
     quill::Logger* logger{nullptr};
+    std::string jsonScratch;
 #if OSMCLI_HAVE_OTEL
     otel_nostd::shared_ptr<opentelemetry::trace::Tracer> tracer;
     otel_nostd::shared_ptr<opentelemetry::metrics::Meter> meter;
@@ -640,7 +641,20 @@ template <class T>
 struct PageScratch {
     std::string body;
     std::vector<T> chunk;
+    std::string target;
 };
+
+inline void addPageParams(const std::string& base, int page, int pageSize, std::string& out)
+{
+    out.clear();
+    out.reserve(base.size() + 32);
+    out.append(base);
+    out += (base.find('?') == std::string::npos) ? "?" : "&";
+    out += "page=";
+    out += std::to_string(page);
+    out += "&page_size=";
+    out += std::to_string(pageSize);
+}
 
 template <class T>
 std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
@@ -655,9 +669,9 @@ std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
     std::vector<T> all;
     int page = 1;
     while (true) {
-        const std::string target = addPageParams(baseTarget, page, pageSize);
+        addPageParams(baseTarget, page, pageSize, buf->target);
         try {
-            httpGet(cfg, target, authHeader, std::chrono::milliseconds(15000), logger, buf->body);
+            httpGet(cfg, buf->target, authHeader, std::chrono::milliseconds(15000), logger, buf->body);
             parseArrayInto<T>(buf->body, buf->chunk);
             if (buf->chunk.empty()) break;
             all.reserve(all.size() + buf->chunk.size());
@@ -670,7 +684,7 @@ std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
                 if (snippet.size() > 256) snippet = snippet.substr(0, 256);
                 QUILL_LOG_WARNING(logger,
                                    "[http] pagination fetch failed for {}: {} (page={}) body_snippet='{}'",
-                                   target,
+                                   buf->target,
                                    ex.what(),
                                    page,
                                    snippet);
@@ -714,6 +728,15 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
     }
     catch (const std::exception&) {
         summary.overview = std::nullopt;
+    }
+
+    // Pre-reserve top-level vectors using overview counts when available to reduce growth.
+    if (summary.overview) {
+        const auto& ot = summary.overview->object_totals;
+        if (ot.exchanges > 0) summary.exchanges.reserve(static_cast<std::size_t>(ot.exchanges));
+        if (ot.queues > 0) summary.queues.reserve(static_cast<std::size_t>(ot.queues));
+        // No bindings count in overview; use channels as a loose upper bound if present.
+        if (ot.channels > 0) summary.bindings.reserve(static_cast<std::size_t>(ot.channels));
     }
     logStart("/api/vhosts");
     const auto vhostsJson = httpGet(cfg, "/api/vhosts", auth, std::chrono::milliseconds(15000), logger);
@@ -1218,12 +1241,12 @@ int main(int argc, char** argv)
                     if (summaryPath.has_parent_path()) {
                         std::filesystem::create_directories(summaryPath.parent_path());
                     }
-                    auto jsonExp = ::glz::write_json(httpSummary);
-                    if (!jsonExp) {
+                    std::string jsonBuf;
+                    if (auto ec = ::glz::write_json(httpSummary, jsonBuf); ec) {
                         throw std::runtime_error("failed to serialize HTTP summary");
                     }
-                    std::ofstream out(summaryPath);
-                    out << *jsonExp;
+                    std::ofstream out(summaryPath, std::ios::binary);
+                    out.write(jsonBuf.data(), static_cast<std::streamsize>(jsonBuf.size()));
                     QUILL_LOG_INFO(logger,
                                    "[http] wrote full HTTP summary to {}",
                                    summaryPath.string());
@@ -1338,16 +1361,31 @@ int main(int argc, char** argv)
         cconfig.setPrefetchCount(cfg.prefetch);
 
             // Create passive queues and consumers for each requested queue
+            std::filesystem::path latPath;
+            std::shared_ptr<std::ofstream> latStream;
+            if (!resolvedLogDir.empty()) {
+                latPath = resolvedLogDir / fmt::format("latency_samples-{}.ndjson", runStamp);
+                try {
+                    if (latPath.has_parent_path()) {
+                        std::filesystem::create_directories(latPath.parent_path());
+                    }
+                    latStream = std::make_shared<std::ofstream>(latPath, std::ios::app | std::ios::binary);
+                    if (!latStream->is_open()) {
+                        latStream.reset();
+                    }
+                }
+                catch (...) {
+                }
+            }
             for (const auto& qname : cfg.queues) {
                 // Per-queue callback to include queue name in logs
                 std::string qnameStd(qname.data(), qname.size());
-                auto onMessage = [logger, &app, qnameStd, &resolvedLogDir, runStamp](rmqp::MessageGuard& guard) {
+                std::string_view qnameView(qname.data(), qname.size());
+                auto onMessage = [logger, &app, qnameStd, qnameView, latPath, latStream](rmqp::MessageGuard& guard) {
                     const auto& msg = guard.message();
                     const auto& env = guard.envelope();
-                    std::string exchange(env.exchange().data(),
-                                         env.exchange().size());
-                    std::string routingKey(env.routingKey().data(),
-                                           env.routingKey().size());
+                    const auto exchange = env.exchange();     // view into envelope
+                    const auto routingKey = env.routingKey(); // view into envelope
                     const auto entrySteady = std::chrono::steady_clock::now();
                     const std::uint64_t entryRealNs = TW::getRealtimeNs();
                     const std::uint64_t entryTsc = TW::getTSC();
@@ -1355,15 +1393,10 @@ int main(int argc, char** argv)
                                                        std::uint64_t exitTsc,
                                                        std::uint64_t exitRealNs,
                                                        std::optional<std::uint64_t> socketTsNs = std::nullopt) {
-                        if (resolvedLogDir.empty()) return;
-                        std::filesystem::path latPath =
-                            resolvedLogDir / fmt::format("latency_samples-{}.ndjson", runStamp);
+                        if (latPath.empty() || !latStream) return;
                         try {
-                            if (latPath.has_parent_path()) {
-                                std::filesystem::create_directories(latPath.parent_path());
-                            }
                             LatencySample sample;
-                            sample.queue = qnameStd;
+                            sample.queue.assign(qnameView.data(), qnameView.size());
                             sample.duration_ns = durNs;
                             sample.tsc_delta = exitTsc - entryTsc;
                             sample.tsc_entry = entryTsc;
@@ -1371,16 +1404,15 @@ int main(int argc, char** argv)
                             sample.real_entry_ns = entryRealNs;
                             sample.real_exit_ns = exitRealNs;
                             sample.socket_ts_ns = socketTsNs;
-                            auto jsonExp = ::glz::write_json(sample);
-                            if (!jsonExp) {
-                                QUILL_LOG_WARNING(logger, "failed to serialize latency sample");
-                                return;
+                            if (auto ec = ::glz::write_json(sample, app.jsonScratch); !ec) {
+                                app.jsonScratch.push_back('\n');
+                                latStream->write(app.jsonScratch.data(),
+                                                 static_cast<std::streamsize>(app.jsonScratch.size()));
+                                app.jsonScratch.clear();
                             }
-                            std::ofstream out(latPath, std::ios::app);
-                            out << *jsonExp << "\n";
                         }
-                        catch (const std::exception& ex) {
-                            QUILL_LOG_WARNING(logger, "failed to write latency sample: {}", ex.what());
+                        catch (...) {
+                            // best-effort
                         }
                     };
                     ScopeExit exitGuard([&] {
