@@ -340,11 +340,13 @@ class QuillBallObserver : public ball::Observer {
         if (!d_logger) return;
         const auto& ff = record.fixedFields();
         const std::string_view cat = ff.category();
-        // Per-category thresholds: channel/connection -> WARN+, others -> cfg-driven (mapSeverity).
-        const bool isChannel = cat.rfind("RMQAMQP.CHANNEL", 0) == 0;
-        const bool isConn = cat.rfind("RMQAMQP.CONNECTION", 0) == 0;
-        if ((isChannel || isConn) && ff.severity() < ball::Severity::e_WARN) {
-            return;
+        // Per-category thresholds: noisy RMQAMQP/RMQIO below WARN are dropped.
+        static constexpr std::array<std::string_view, 4> noisyPrefixes = {
+            "RMQAMQP.CHANNEL", "RMQAMQP.CONNECTION", "RMQIO.ASIOEVENTLOOP", "RMQIO.EVENTLOOP"};
+        for (auto prefix : noisyPrefixes) {
+            if (cat.rfind(prefix, 0) == 0 && ff.severity() < ball::Severity::e_WARN) {
+                return;
+            }
         }
         const std::string_view msg = ff.message();
         const auto lvl = mapSeverity(ff.severity());
@@ -1412,7 +1414,7 @@ int main(int argc, char** argv)
             for (const auto& q : httpSummary.queues) {
                 if (q.vhost == std::string(cfg.vhost.data(), cfg.vhost.size())) {
                     const std::string qname(q.name.data(), q.name.size());
-                    if (q.exclusive) {
+                    if (cfg.skipExclusiveQueues && q.exclusive) {
                         skippedExclusive.emplace_back(qname);
                         continue;
                     }

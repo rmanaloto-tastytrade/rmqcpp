@@ -61,6 +61,7 @@ struct JsonConfig {
     bool httpDisableStats{true};
     bool httpEnableQueueTotals{true};
     bool skipAutoDeleteQueues{false};
+    bool skipExclusiveQueues{true};
     bsl::string overviewCachePath;
 };
 
@@ -116,6 +117,7 @@ struct glz::meta<osmcli::JsonConfig> {
         "http_disable_stats", &T::httpDisableStats,
         "http_enable_queue_totals", &T::httpEnableQueueTotals,
         "skip_auto_delete_queues", &T::skipAutoDeleteQueues,
+        "skip_exclusive_queues", &T::skipExclusiveQueues,
         "overview_cache", &T::overviewCachePath);
 };
 
@@ -400,6 +402,9 @@ ConnectionConfig loadConfig(int argc, char** argv)
     app.add_flag("--skip-auto-delete-queues",
                  cfg.skipAutoDeleteQueues,
                  "Skip auto-delete queues when discovering via HTTP admin");
+    app.add_flag("--skip-exclusive-queues",
+                 cfg.skipExclusiveQueues,
+                 "Skip exclusive queues when discovering via HTTP admin");
     app.add_option("--overview-cache",
                    cfg.overviewCachePath,
                    "Path to cached /api/overview JSON (used if HTTP admin is disabled)");

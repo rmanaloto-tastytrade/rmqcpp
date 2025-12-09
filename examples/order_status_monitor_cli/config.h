@@ -52,6 +52,7 @@ struct ConnectionConfig {
     bool httpDisableStats{true};
     bool httpEnableQueueTotals{true};
     bool skipAutoDeleteQueues{false};
+    bool skipExclusiveQueues{true};
     bsl::string overviewCachePath;  // optional cache of /api/overview for offline mode
 
     // Consumer tuning
