@@ -48,6 +48,9 @@ struct ConnectionConfig {
     bsl::string httpAdminUser;
     bsl::string httpAdminPassword;
     std::uint16_t httpAdminPort{15672};
+    int httpPageSize{0};  // 0 = no explicit pagination (matches rabbitmqadmin-ng)
+    bool httpDisableStats{true};
+    bool httpEnableQueueTotals{true};
     bool skipAutoDeleteQueues{false};
     bsl::string overviewCachePath;  // optional cache of /api/overview for offline mode
 

@@ -57,6 +57,9 @@ struct JsonConfig {
     bsl::string httpAdminUser;
     bsl::string httpAdminPassword;
     std::uint16_t httpAdminPort{15672};
+    int httpPageSize{0};
+    bool httpDisableStats{true};
+    bool httpEnableQueueTotals{true};
     bool skipAutoDeleteQueues{false};
     bsl::string overviewCachePath;
 };
@@ -109,6 +112,9 @@ struct glz::meta<osmcli::JsonConfig> {
         "http_admin_user", &T::httpAdminUser,
         "http_admin_password", &T::httpAdminPassword,
         "http_admin_port", &T::httpAdminPort,
+        "http_page_size", &T::httpPageSize,
+        "http_disable_stats", &T::httpDisableStats,
+        "http_enable_queue_totals", &T::httpEnableQueueTotals,
         "skip_auto_delete_queues", &T::skipAutoDeleteQueues,
         "overview_cache", &T::overviewCachePath);
 };
@@ -388,6 +394,9 @@ ConnectionConfig loadConfig(int argc, char** argv)
     app.add_option("--http-admin-user", cfg.httpAdminUser, "HTTP admin username (defaults to AMQP username)");
     app.add_option("--http-admin-password", cfg.httpAdminPassword, "HTTP admin password (defaults to AMQP password)");
     app.add_option("--http-admin-port", cfg.httpAdminPort, "HTTP admin port (default 15672)");
+    app.add_option("--http-page-size", cfg.httpPageSize, "HTTP page size (0 = no explicit pagination)");
+    app.add_flag("--http-disable-stats", cfg.httpDisableStats, "Disable stats fields in HTTP listings (default: on)");
+    app.add_flag("--http-enable-queue-totals", cfg.httpEnableQueueTotals, "Include queue totals even when stats are disabled (default: on)");
     app.add_flag("--skip-auto-delete-queues",
                  cfg.skipAutoDeleteQueues,
                  "Skip auto-delete queues when discovering via HTTP admin");

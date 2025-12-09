@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <expected>
+#include <type_traits>
 #include <string>
 #include <string_view>
 #include <optional>
@@ -184,6 +185,59 @@ struct HttpBinding {
     bsl::string destination_type;
     bsl::string routing_key;
 };
+struct HttpConnection {
+    std::string name;
+    std::string user;
+    std::string state;
+    int channels{};
+};
+struct HttpChannelConnDetails {
+    std::string name;
+    std::string peer_host;
+    int peer_port{};
+};
+struct HttpChannel {
+    std::string name;
+    std::string vhost;
+    HttpChannelConnDetails connection_details;
+    int number{};
+    std::string state;
+};
+struct HttpConsumerChannelDetails {
+    std::string name;
+    int number{};
+};
+struct HttpConsumerQueue {
+    std::string name;
+    std::string vhost;
+};
+struct HttpConsumer {
+    std::string consumer_tag;
+    HttpConsumerQueue queue;
+    HttpConsumerChannelDetails channel_details;
+};
+struct HttpPolicy {
+    std::string name;
+    std::string vhost;
+    std::string pattern;
+    std::string apply_to;
+    int priority{};
+};
+struct HttpOperatorPolicy {
+    std::string name;
+    std::string vhost;
+    std::string pattern;
+    int priority{};
+};
+struct HttpFeatureFlag {
+    std::string name;
+    std::string state;
+};
+struct HttpDeprecatedFeature {
+    std::string name;
+    std::string doc_url;
+    bool used{};
+};
 
 template <class T>
 struct PagedResponse {
@@ -195,6 +249,14 @@ struct HttpAdminSummary {
     std::vector<HttpExchange> exchanges;
     std::vector<HttpQueue> queues;
     std::vector<HttpBinding> bindings;
+    std::vector<HttpConnection> connections;
+    std::vector<HttpChannel> channels;
+    std::vector<HttpConsumer> consumers;
+    std::vector<HttpPolicy> policies;
+    std::vector<HttpOperatorPolicy> operatorPolicies;
+    std::vector<HttpFeatureFlag> featureFlags;
+    std::vector<HttpDeprecatedFeature> deprecatedFeatures;
+    std::vector<HttpDeprecatedFeature> deprecatedFeaturesUsed;
     struct Overview {
         std::string cluster_name;
         std::string rabbitmq_version;
@@ -744,6 +806,7 @@ std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
 HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logger* logger)
 {
     HttpAdminSummary summary;
+    const int pageSize = cfg.httpPageSize > 0 ? cfg.httpPageSize : 500;
     const std::string user = cfg.httpAdminUser.empty()
                                  ? std::string(cfg.username.data(), cfg.username.size())
                                  : std::string(cfg.httpAdminUser.data(), cfg.httpAdminUser.size());
@@ -794,8 +857,11 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
     PageScratch<HttpExchange> exchScratch;
     for (const auto& v : summary.vhosts) {
         const auto encoded = encodePathSegment(v);
-        const std::string base = "/api/exchanges/" + encoded + "?disable_stats=true";
-        auto chunk = fetchPaged<HttpExchange>(cfg, base, auth, logger, 500, &exchScratch);
+        std::string base = "/api/exchanges/" + encoded;
+        if (cfg.httpDisableStats) {
+            base += "?disable_stats=true";
+        }
+        auto chunk = fetchPaged<HttpExchange>(cfg, base, auth, logger, pageSize, &exchScratch);
         if (logger) {
             QUILL_LOG_INFO(logger, "[http] {}: fetched {} exchanges", base, chunk.size());
         }
@@ -807,9 +873,15 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
     PageScratch<HttpQueue> queueScratch;
     for (const auto& v : summary.vhosts) {
         const auto encoded = encodePathSegment(v);
-        const std::string base =
-            "/api/queues/" + encoded + "?disable_stats=true&enable_queue_totals=true";
-        auto chunk = fetchPaged<HttpQueue>(cfg, base, auth, logger, 500, &queueScratch);
+        std::string base = "/api/queues/" + encoded;
+        std::vector<std::string> params;
+        if (cfg.httpDisableStats) params.emplace_back("disable_stats=true");
+        if (cfg.httpEnableQueueTotals) params.emplace_back("enable_queue_totals=true");
+        if (!params.empty()) {
+            base += "?";
+            base += fmt::format("{}", fmt::join(params, "&"));
+        }
+        auto chunk = fetchPaged<HttpQueue>(cfg, base, auth, logger, pageSize, &queueScratch);
         if (logger) {
             QUILL_LOG_INFO(logger, "[http] {}: fetched {} queues", base, chunk.size());
         }
@@ -823,15 +895,64 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
             httpGetExpected(cfg, "/api/bindings", auth, std::chrono::milliseconds(15000), logger)) {
         if (auto parsed = parseArrayExpected<HttpBinding>(*bodyRes)) {
             summary.bindings = std::move(*parsed);
+            if (logger) {
+                QUILL_LOG_INFO(logger, "[http] /api/bindings: fetched {}", summary.bindings.size());
+            }
         }
         else if (logger) {
             QUILL_LOG_ERROR(logger, "[http] /api/bindings parse failed: {}", parsed.error());
+            // Optional fallback: definitions
+            if (cfg.enableHttpAdmin) {
+                if (auto defsBody =
+                        httpGetExpected(cfg, "/api/definitions", auth, std::chrono::milliseconds(15000), logger)) {
+                    try {
+                        std::vector<HttpBinding> defBindings;
+                        parseArrayInto<HttpBinding>(*defsBody, defBindings);
+                        if (!defBindings.empty()) {
+                            summary.bindings.swap(defBindings);
+                            QUILL_LOG_WARNING(logger, "[http] bindings parsed from /api/definitions fallback: {}",
+                                              summary.bindings.size());
+                        }
+                    }
+                    catch (...) {
+                        QUILL_LOG_ERROR(logger, "[http] /api/definitions fallback parse failed");
+                    }
+                }
+            }
         }
     }
     else if (logger) {
         QUILL_LOG_ERROR(logger, "[http] /api/bindings failed: {}", bodyRes.error());
     }
     logDone("/api/bindings");
+
+    auto fetchSimple = [&](const char* label, const std::string& target, auto& dest) {
+        logStart(label);
+        if (auto body = httpGetExpected(cfg, target, auth, std::chrono::milliseconds(15000), logger)) {
+            if (auto parsed = parseArrayExpected<typename std::remove_reference<decltype(dest)>::type::value_type>(*body)) {
+                dest = std::move(*parsed);
+                if (logger) {
+                    QUILL_LOG_INFO(logger, "[http] {}: fetched {}", target, dest.size());
+                }
+            }
+            else if (logger) {
+                QUILL_LOG_ERROR(logger, "[http] {} parse failed: {}", target, parsed.error());
+            }
+        }
+        else if (logger) {
+            QUILL_LOG_ERROR(logger, "[http] {} failed: {}", target, body.error());
+        }
+        logDone(label);
+    };
+
+    fetchSimple("/api/connections", "/api/connections", summary.connections);
+    fetchSimple("/api/channels", "/api/channels", summary.channels);
+    fetchSimple("/api/consumers", "/api/consumers", summary.consumers);
+    fetchSimple("/api/policies", "/api/policies", summary.policies);
+    fetchSimple("/api/operator-policies", "/api/operator-policies", summary.operatorPolicies);
+    fetchSimple("/api/feature-flags", "/api/feature-flags", summary.featureFlags);
+    fetchSimple("/api/deprecated-features", "/api/deprecated-features", summary.deprecatedFeatures);
+    fetchSimple("/api/deprecated-features/used", "/api/deprecated-features/used", summary.deprecatedFeaturesUsed);
     return summary;
 }
 
@@ -898,6 +1019,88 @@ struct meta<osmcli_http::HttpBinding> {
                "destination", &T::destination,
                "destination_type", &T::destination_type,
                "routing_key", &T::routing_key);
+};
+template <>
+struct meta<osmcli_http::HttpConnection> {
+    using T = osmcli_http::HttpConnection;
+    static constexpr auto value =
+        object("name", &T::name,
+               "user", &T::user,
+               "state", &T::state,
+               "channels", &T::channels);
+};
+template <>
+struct meta<osmcli_http::HttpChannelConnDetails> {
+    using T = osmcli_http::HttpChannelConnDetails;
+    static constexpr auto value =
+        object("name", &T::name,
+               "peer_host", &T::peer_host,
+               "peer_port", &T::peer_port);
+};
+template <>
+struct meta<osmcli_http::HttpChannel> {
+    using T = osmcli_http::HttpChannel;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost,
+               "connection_details", &T::connection_details,
+               "number", &T::number,
+               "state", &T::state);
+};
+template <>
+struct meta<osmcli_http::HttpConsumerChannelDetails> {
+    using T = osmcli_http::HttpConsumerChannelDetails;
+    static constexpr auto value =
+        object("name", &T::name,
+               "number", &T::number);
+};
+template <>
+struct meta<osmcli_http::HttpConsumerQueue> {
+    using T = osmcli_http::HttpConsumerQueue;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost);
+};
+template <>
+struct meta<osmcli_http::HttpConsumer> {
+    using T = osmcli_http::HttpConsumer;
+    static constexpr auto value =
+        object("consumer_tag", &T::consumer_tag,
+               "queue", &T::queue,
+               "channel_details", &T::channel_details);
+};
+template <>
+struct meta<osmcli_http::HttpPolicy> {
+    using T = osmcli_http::HttpPolicy;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost,
+               "pattern", &T::pattern,
+               "apply-to", &T::apply_to,
+               "priority", &T::priority);
+};
+template <>
+struct meta<osmcli_http::HttpOperatorPolicy> {
+    using T = osmcli_http::HttpOperatorPolicy;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost,
+               "pattern", &T::pattern,
+               "priority", &T::priority);
+};
+template <>
+struct meta<osmcli_http::HttpFeatureFlag> {
+    using T = osmcli_http::HttpFeatureFlag;
+    static constexpr auto value = object("name", &T::name,
+                                         "state", &T::state);
+};
+template <>
+struct meta<osmcli_http::HttpDeprecatedFeature> {
+    using T = osmcli_http::HttpDeprecatedFeature;
+    static constexpr auto value =
+        object("name", &T::name,
+               "doc_url", &T::doc_url,
+               "used", &T::used);
 };
 
 template <class T>
