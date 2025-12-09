@@ -922,6 +922,7 @@ struct meta<SpanJson> {
 int main(int argc, char** argv)
 {
     auto cfg = osmcli::loadConfig(argc, argv);
+    std::string httpJsonScratch;
 
     // Set up quill logger (default file under logs/, optionally stdout/stderr)
     std::filesystem::path exeDir;
@@ -1235,19 +1236,18 @@ int main(int argc, char** argv)
 #endif
                 const auto timestamp =
                     fmt::format("{:%Y%m%d.%H%M%S}.{:09d}", tm, static_cast<int>(ns));
-                std::filesystem::path summaryPath =
-                    resolvedLogDir / fmt::format("http_summary-{}.json", timestamp);
-                try {
-                    if (summaryPath.has_parent_path()) {
-                        std::filesystem::create_directories(summaryPath.parent_path());
-                    }
-                    static thread_local std::string jsonBuf;
-                    jsonBuf.clear();
-                    if (auto ec = ::glz::write_json(httpSummary, jsonBuf); ec) {
-                        throw std::runtime_error("failed to serialize HTTP summary");
-                    }
-                    std::ofstream out(summaryPath, std::ios::binary);
-                    out.write(jsonBuf.data(), static_cast<std::streamsize>(jsonBuf.size()));
+                    std::filesystem::path summaryPath =
+                        resolvedLogDir / fmt::format("http_summary-{}.json", timestamp);
+                    try {
+                        if (summaryPath.has_parent_path()) {
+                            std::filesystem::create_directories(summaryPath.parent_path());
+                        }
+                    httpJsonScratch.clear();
+                    if (auto ec = ::glz::write_json(httpSummary, httpJsonScratch); ec) {
+                            throw std::runtime_error("failed to serialize HTTP summary");
+                        }
+                        std::ofstream out(summaryPath, std::ios::binary);
+                        out.write(httpJsonScratch.data(), static_cast<std::streamsize>(httpJsonScratch.size()));
                     QUILL_LOG_INFO(logger,
                                    "[http] wrote full HTTP summary to {}",
                                    summaryPath.string());
