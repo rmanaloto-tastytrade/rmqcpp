@@ -1241,7 +1241,8 @@ int main(int argc, char** argv)
                     if (summaryPath.has_parent_path()) {
                         std::filesystem::create_directories(summaryPath.parent_path());
                     }
-                    std::string jsonBuf;
+                    static thread_local std::string jsonBuf;
+                    jsonBuf.clear();
                     if (auto ec = ::glz::write_json(httpSummary, jsonBuf); ec) {
                         throw std::runtime_error("failed to serialize HTTP summary");
                     }
