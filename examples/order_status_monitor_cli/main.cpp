@@ -34,6 +34,7 @@
 #include <chrono>
 #include <filesystem>
 #include <cstdio>
+#include <expected>
 #include <string>
 #include <string_view>
 #include <optional>
@@ -595,6 +596,20 @@ void httpGet(const osmcli::ConnectionConfig& cfg,
     outBody = httpGet(cfg, target, authHeader, timeout, logger);
 }
 
+std::expected<std::string, std::string> httpGetExpected(const osmcli::ConnectionConfig& cfg,
+                                                        const std::string& target,
+                                                        const std::string& authHeader,
+                                                        std::chrono::milliseconds timeout,
+                                                        quill::Logger* logger)
+{
+    try {
+        return httpGet(cfg, target, authHeader, timeout, logger);
+    }
+    catch (const std::exception& ex) {
+        return std::unexpected(std::string(ex.what()));
+    }
+}
+
 std::string addPageParams(const std::string& base, int page, int pageSize)
 {
     std::string out = base;
@@ -638,6 +653,25 @@ void parseArrayInto(const std::string& json, std::vector<T>& out)
 }
 
 template <class T>
+std::vector<T> parseArray(const std::string& json)
+{
+    std::vector<T> out;
+    parseArrayInto(json, out);
+    return out;
+}
+
+template <class T>
+std::expected<std::vector<T>, std::string> parseArrayExpected(const std::string& json)
+{
+    try {
+        return parseArray<T>(json);
+    }
+    catch (const std::exception& ex) {
+        return std::unexpected(std::string(ex.what()));
+    }
+}
+
+template <class T>
 struct PageScratch {
     std::string body;
     std::vector<T> chunk;
@@ -668,10 +702,21 @@ std::vector<T> fetchPaged(const osmcli::ConnectionConfig& cfg,
     PageScratch<T>* buf = scratch ? scratch : &local;
     std::vector<T> all;
     int page = 1;
+    std::string lastBody;
     while (true) {
         addPageParams(baseTarget, page, pageSize, buf->target);
         try {
             httpGet(cfg, buf->target, authHeader, std::chrono::milliseconds(15000), logger, buf->body);
+            if (page > 1 && buf->body == lastBody) {
+                if (logger) {
+                    QUILL_LOG_WARNING(logger,
+                                      "[http] pagination appears ignored for {} (page={} returned identical body); stopping",
+                                      buf->target,
+                                      page);
+                }
+                break;
+            }
+            lastBody = buf->body;
             parseArrayInto<T>(buf->body, buf->chunk);
             if (buf->chunk.empty()) break;
             all.reserve(all.size() + buf->chunk.size());
@@ -772,18 +817,21 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
     }
     logDone("/api/queues (per vhost)");
 
-    logStart("/api/bindings (per vhost)");
-    PageScratch<HttpBinding> bindScratch;
-    for (const auto& v : summary.vhosts) {
-        const auto encoded = encodePathSegment(v);
-        const std::string base = "/api/bindings/" + encoded;
-        auto chunk = fetchPaged<HttpBinding>(cfg, base, auth, logger, 500, &bindScratch);
-        if (logger) {
-            QUILL_LOG_INFO(logger, "[http] {}: fetched {} bindings", base, chunk.size());
+    // Bindings: mirror rabbitmqadmin-ng: single global /api/bindings, no explicit pagination flag
+    logStart("/api/bindings");
+    if (auto bodyRes =
+            httpGetExpected(cfg, "/api/bindings", auth, std::chrono::milliseconds(15000), logger)) {
+        if (auto parsed = parseArrayExpected<HttpBinding>(*bodyRes)) {
+            summary.bindings = std::move(*parsed);
         }
-        summary.bindings.insert(summary.bindings.end(), chunk.begin(), chunk.end());
+        else if (logger) {
+            QUILL_LOG_ERROR(logger, "[http] /api/bindings parse failed: {}", parsed.error());
+        }
     }
-    logDone("/api/bindings (per vhost)");
+    else if (logger) {
+        QUILL_LOG_ERROR(logger, "[http] /api/bindings failed: {}", bodyRes.error());
+    }
+    logDone("/api/bindings");
     return summary;
 }
 
@@ -1387,6 +1435,8 @@ int main(int argc, char** argv)
                     const auto& env = guard.envelope();
                     const auto exchange = env.exchange();     // view into envelope
                     const auto routingKey = env.routingKey(); // view into envelope
+                    const std::string_view exchangeView(exchange.data(), exchange.size());
+                    const std::string_view routingView(routingKey.data(), routingKey.size());
                     const auto entrySteady = std::chrono::steady_clock::now();
                     const std::uint64_t entryRealNs = TW::getRealtimeNs();
                     const std::uint64_t entryTsc = TW::getTSC();
@@ -1441,9 +1491,9 @@ int main(int argc, char** argv)
                     QUILL_LOG_INFO(logger,
                                    "delivery tag={} exchange={} queue={} rk={} bytes={}",
                                    env.deliveryTag(),
-                                   exchange,
+                                   exchangeView,
                                    qnameStd,
-                                   routingKey,
+                                   routingView,
                                    msg.payloadSize());
                     guard.ack();
                 };
