@@ -79,3 +79,4 @@ generateddocs/
 # Local order_status_monitor_cli configs (keep only samples in Git)
 examples/order_status_monitor_cli/config*.json
 !examples/order_status_monitor_cli/config.sample.json
+!examples/order_status_monitor_cli/config.static.example.json
