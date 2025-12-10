@@ -7,7 +7,7 @@
 - Enforce clang-22 + libc++ toolchain across presets; keep CMake/libc++ checks green.
 - Continue monitor example hardening (single-threaded Asio loop, management polling TBD).
 - **Match rabbitmqadmin-ng behavior (monitor/admin CLI):**
-  - Extend HTTP crawl coverage to include connections/channels/consumers, policies/limits/feature-flags, etc., caching results alongside exchanges/queues/bindings.
+  - Remaining HTTP crawl parity gaps: deeper structured node/plugin detail, per-object bindings when brokers enforce pagination, and any endpoints that require pagination flags.
   - Keep bindings as a single global `/api/bindings` call (no pagination flags); add a fallback to `/api/definitions` for bindings if `/api/bindings` fails, while logging errors.
   - Tune BALL log noise (category thresholds) while still forwarding all events to Quill.
   - Add config toggles for page_size/stats flags (default: no pagination to mirror rabbitmqadmin-ng; allow queue totals/stats to be disabled for speed).

@@ -216,6 +216,111 @@ struct HttpConsumer {
     HttpConsumerQueue queue;
     HttpConsumerChannelDetails channel_details;
 };
+struct HttpNode {
+    std::string name;
+    std::string type;
+    bool running{};
+};
+struct HttpHealth {
+    std::string status;
+};
+struct HttpStreamConnection {
+    std::string name;
+    std::string vhost;
+};
+struct HttpStreamPublisher {
+    std::string name;
+    std::string vhost;
+};
+struct HttpStreamConsumer {
+    std::string name;
+    std::string vhost;
+};
+struct HttpAliveness {
+    std::string vhost;
+    std::string status;
+};
+struct HttpPlugin {
+    std::string name;
+    std::string version;
+    bool enabled{};
+};
+struct HttpNodeDetail {
+    std::string name;
+    std::string type;
+    bool running{};
+    std::int64_t os_pid{};
+    std::int64_t uptime{};
+    std::int64_t mem_used{};
+    std::int64_t mem_limit{};
+    std::int64_t fd_used{};
+    std::int64_t fd_total{};
+    std::int64_t sockets_used{};
+    std::int64_t sockets_total{};
+    std::int64_t run_queue{};
+    std::int64_t disk_free{};
+    std::int64_t disk_free_limit{};
+    bool disk_free_alarm{};
+    std::int64_t processes{};
+    std::int64_t processes_used{};
+    std::int64_t mem_alarm{};
+    std::int64_t processors{};
+    std::int64_t proc_used{};
+    std::int64_t proc_total{};
+    std::int64_t gc_num{};
+    std::int64_t gc_bytes_reclaimed{};
+    std::int64_t io_read_count{};
+    std::int64_t io_read_bytes{};
+    std::int64_t io_write_count{};
+    std::int64_t io_write_bytes{};
+};
+struct HttpUser {
+    std::string name;
+    std::vector<std::string> tags;
+};
+struct HttpPermission {
+    std::string user;
+    std::string vhost;
+    std::string configure;
+    std::string write;
+    std::string read;
+};
+struct HttpTopicPermission {
+    std::string user;
+    std::string vhost;
+    std::string exchange;
+    std::string write;
+    std::string read;
+};
+struct HttpUserLimit {
+    std::string user;
+    int max_connections{};
+    int max_channels{};
+};
+struct HttpVhostLimit {
+    std::string vhost;
+    int max_connections{};
+    int max_queues{};
+};
+struct HttpParameter {
+    std::string component;
+    std::string name;
+    std::string vhost;
+};
+struct HttpGlobalParameter {
+    std::string name;
+};
+struct HttpShovel {
+    std::string name;
+    std::string vhost;
+    std::string state;
+};
+struct HttpFederationLink {
+    std::string name;
+    std::string vhost;
+    std::string upstream;
+    std::string status;
+};
 struct HttpPolicy {
     std::string name;
     std::string vhost;
@@ -257,6 +362,27 @@ struct HttpAdminSummary {
     std::vector<HttpFeatureFlag> featureFlags;
     std::vector<HttpDeprecatedFeature> deprecatedFeatures;
     std::vector<HttpDeprecatedFeature> deprecatedFeaturesUsed;
+    std::vector<HttpNode> nodes;
+    std::vector<HttpHealth> healthAlarms;
+    std::vector<HttpHealth> healthLocalAlarms;
+    std::vector<HttpHealth> healthVirtualHosts;
+    std::vector<HttpHealth> healthReady;
+    std::vector<HttpStreamConnection> streamConnections;
+    std::vector<HttpStreamPublisher> streamPublishers;
+    std::vector<HttpStreamConsumer> streamConsumers;
+    std::vector<HttpAliveness> aliveness;
+    std::vector<HttpPlugin> plugins;
+    std::vector<HttpNodeDetail> nodeDetails;
+    std::vector<std::string> nodeDetailsJson;
+    std::vector<HttpUser> users;
+    std::vector<HttpPermission> permissions;
+    std::vector<HttpTopicPermission> topicPermissions;
+    std::vector<HttpUserLimit> userLimits;
+    std::vector<HttpVhostLimit> vhostLimits;
+    std::vector<HttpParameter> parameters;
+    std::vector<HttpGlobalParameter> globalParameters;
+    std::vector<HttpShovel> shovels;
+    std::vector<HttpFederationLink> federationLinks;
     struct Overview {
         std::string cluster_name;
         std::string rabbitmq_version;
@@ -1028,38 +1154,64 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
 
     // Bindings: mirror rabbitmqadmin-ng: single global /api/bindings, no explicit pagination flag
     logStart("/api/bindings");
+    bool bindingsOk = false;
     if (auto bodyRes =
             httpGetExpected(cfg, "/api/bindings", auth, std::chrono::milliseconds(15000), logger)) {
         if (auto parsed = parseArrayExpected<HttpBinding>(*bodyRes)) {
             summary.bindings = std::move(*parsed);
+            bindingsOk = true;
             if (logger) {
                 QUILL_LOG_INFO(logger, "[http] /api/bindings: fetched {}", summary.bindings.size());
             }
         }
         else if (logger) {
             QUILL_LOG_ERROR(logger, "[http] /api/bindings parse failed: {}", parsed.error());
-            // Optional fallback: definitions
-            if (cfg.enableHttpAdmin) {
-                if (auto defsBody =
-                        httpGetExpected(cfg, "/api/definitions", auth, std::chrono::milliseconds(15000), logger)) {
-                    try {
-                        std::vector<HttpBinding> defBindings;
-                        parseArrayInto<HttpBinding>(*defsBody, defBindings);
-                        if (!defBindings.empty()) {
-                            summary.bindings.swap(defBindings);
-                            QUILL_LOG_WARNING(logger, "[http] bindings parsed from /api/definitions fallback: {}",
-                                              summary.bindings.size());
-                        }
-                    }
-                    catch (...) {
-                        QUILL_LOG_ERROR(logger, "[http] /api/definitions fallback parse failed");
-                    }
-                }
-            }
         }
     }
     else if (logger) {
         QUILL_LOG_ERROR(logger, "[http] /api/bindings failed: {}", bodyRes.error());
+    }
+    // Fallback to per-vhost bindings if global failed or returned empty
+    if (!bindingsOk || summary.bindings.empty()) {
+        for (const auto& v : summary.vhosts) {
+            const auto encoded = encodePathSegment(v);
+            const std::string target = "/api/bindings/" + encoded;
+            if (auto body = httpGetExpected(cfg, target, auth, std::chrono::milliseconds(10000), logger)) {
+                if (auto parsed = parseArrayExpected<HttpBinding>(*body)) {
+                    if (!parsed->empty()) {
+                        summary.bindings.insert(summary.bindings.end(),
+                                                parsed->begin(),
+                                                parsed->end());
+                    }
+                }
+                else if (logger) {
+                    QUILL_LOG_WARNING(logger, "[http] bindings parse failed for {}: {}", target, parsed.error());
+                }
+            }
+            else if (logger) {
+                QUILL_LOG_WARNING(logger, "[http] bindings fetch failed for {}: {}", target, body.error());
+            }
+        }
+        if (logger) {
+            QUILL_LOG_INFO(logger, "[http] per-vhost bindings gathered total={}", summary.bindings.size());
+        }
+        if (summary.bindings.empty() && cfg.enableHttpAdmin) {
+            if (auto defsBody =
+                    httpGetExpected(cfg, "/api/definitions", auth, std::chrono::milliseconds(15000), logger)) {
+                try {
+                    std::vector<HttpBinding> defBindings;
+                    parseArrayInto<HttpBinding>(*defsBody, defBindings);
+                    if (!defBindings.empty()) {
+                        summary.bindings.swap(defBindings);
+                        QUILL_LOG_WARNING(logger, "[http] bindings parsed from /api/definitions fallback: {}",
+                                          summary.bindings.size());
+                    }
+                }
+                catch (...) {
+                    QUILL_LOG_ERROR(logger, "[http] /api/definitions fallback parse failed");
+                }
+            }
+        }
     }
     logDone("/api/bindings");
 
@@ -1090,6 +1242,60 @@ HttpAdminSummary fetchHttpAdmin(const osmcli::ConnectionConfig& cfg, quill::Logg
     fetchSimple("/api/feature-flags", "/api/feature-flags", summary.featureFlags);
     fetchSimple("/api/deprecated-features", "/api/deprecated-features", summary.deprecatedFeatures);
     fetchSimple("/api/deprecated-features/used", "/api/deprecated-features/used", summary.deprecatedFeaturesUsed);
+    fetchSimple("/api/nodes", "/api/nodes", summary.nodes);
+    fetchSimple("/api/health/checks/alarms", "/api/health/checks/alarms", summary.healthAlarms);
+    fetchSimple("/api/health/checks/local-alarms", "/api/health/checks/local-alarms", summary.healthLocalAlarms);
+    fetchSimple("/api/health/checks/virtual-hosts", "/api/health/checks/virtual-hosts", summary.healthVirtualHosts);
+    fetchSimple("/api/health/checks/ready-to-serve-clients", "/api/health/checks/ready-to-serve-clients", summary.healthReady);
+    fetchSimple("/api/stream/connections", "/api/stream/connections", summary.streamConnections);
+    fetchSimple("/api/stream/publishers", "/api/stream/publishers", summary.streamPublishers);
+    fetchSimple("/api/stream/consumers", "/api/stream/consumers", summary.streamConsumers);
+    fetchSimple("/api/plugins", "/api/plugins", summary.plugins);
+    // Per-vhost aliveness tests
+    for (const auto& v : summary.vhosts) {
+        const auto encoded = encodePathSegment(v);
+        const std::string target = "/api/aliveness-test/" + encoded;
+        if (auto body = httpGetExpected(cfg, target, auth, std::chrono::milliseconds(10000), logger)) {
+            HttpAliveness a;
+            constexpr auto opts = ::glz::opts{.error_on_unknown_keys = false};
+            auto ec = ::glz::read<opts>(a, *body);
+            if (!ec) {
+                a.vhost = v;
+                summary.aliveness.push_back(std::move(a));
+            }
+            else if (logger) {
+                QUILL_LOG_WARNING(logger, "[http] aliveness parse failed for {}: {}", target, ::glz::format_error(ec, *body));
+            }
+        }
+        else if (logger) {
+            QUILL_LOG_WARNING(logger, "[http] aliveness test failed for {}: {}", target, body.error());
+        }
+    }
+    // Node detail blobs (store raw JSON to avoid over-specified structs)
+    for (const auto& n : summary.nodes) {
+        const std::string target = "/api/nodes/" + n.name;
+        if (auto body = httpGetExpected(cfg, target, auth, std::chrono::milliseconds(15000), logger)) {
+            HttpNodeDetail nd;
+            constexpr auto opts = ::glz::opts{.error_on_unknown_keys = false};
+            auto ec = ::glz::read<opts>(nd, *body);
+            if (!ec) {
+                summary.nodeDetails.push_back(nd);
+            }
+            summary.nodeDetailsJson.push_back(*body);
+        }
+        else if (logger) {
+            QUILL_LOG_WARNING(logger, "[http] node detail failed for {}: {}", target, body.error());
+        }
+    }
+    fetchSimple("/api/users", "/api/users", summary.users);
+    fetchSimple("/api/permissions", "/api/permissions", summary.permissions);
+    fetchSimple("/api/topic-permissions", "/api/topic-permissions", summary.topicPermissions);
+    fetchSimple("/api/user-limits", "/api/user-limits", summary.userLimits);
+    fetchSimple("/api/vhost-limits", "/api/vhost-limits", summary.vhostLimits);
+    fetchSimple("/api/parameters", "/api/parameters", summary.parameters);
+    fetchSimple("/api/global-parameters", "/api/global-parameters", summary.globalParameters);
+    fetchSimple("/api/shovels", "/api/shovels", summary.shovels);
+    fetchSimple("/api/federation-links", "/api/federation-links", summary.federationLinks);
     return summary;
 }
 
@@ -1207,6 +1413,79 @@ struct meta<osmcli_http::HttpConsumer> {
                "channel_details", &T::channel_details);
 };
 template <>
+struct meta<osmcli_http::HttpUser> {
+    using T = osmcli_http::HttpUser;
+    static constexpr auto value =
+        object("name", &T::name,
+               "tags", &T::tags);
+};
+template <>
+struct meta<osmcli_http::HttpPermission> {
+    using T = osmcli_http::HttpPermission;
+    static constexpr auto value =
+        object("user", &T::user,
+               "vhost", &T::vhost,
+               "configure", &T::configure,
+               "write", &T::write,
+               "read", &T::read);
+};
+template <>
+struct meta<osmcli_http::HttpTopicPermission> {
+    using T = osmcli_http::HttpTopicPermission;
+    static constexpr auto value =
+        object("user", &T::user,
+               "vhost", &T::vhost,
+               "exchange", &T::exchange,
+               "write", &T::write,
+               "read", &T::read);
+};
+template <>
+struct meta<osmcli_http::HttpUserLimit> {
+    using T = osmcli_http::HttpUserLimit;
+    static constexpr auto value =
+        object("user", &T::user,
+               "max-connections", &T::max_connections,
+               "max-channels", &T::max_channels);
+};
+template <>
+struct meta<osmcli_http::HttpVhostLimit> {
+    using T = osmcli_http::HttpVhostLimit;
+    static constexpr auto value =
+        object("vhost", &T::vhost,
+               "max-connections", &T::max_connections,
+               "max-queues", &T::max_queues);
+};
+template <>
+struct meta<osmcli_http::HttpParameter> {
+    using T = osmcli_http::HttpParameter;
+    static constexpr auto value =
+        object("component", &T::component,
+               "name", &T::name,
+               "vhost", &T::vhost);
+};
+template <>
+struct meta<osmcli_http::HttpGlobalParameter> {
+    using T = osmcli_http::HttpGlobalParameter;
+    static constexpr auto value = object("name", &T::name);
+};
+template <>
+struct meta<osmcli_http::HttpShovel> {
+    using T = osmcli_http::HttpShovel;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost,
+               "state", &T::state);
+};
+template <>
+struct meta<osmcli_http::HttpFederationLink> {
+    using T = osmcli_http::HttpFederationLink;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost,
+               "upstream", &T::upstream,
+               "status", &T::status);
+};
+template <>
 struct meta<osmcli_http::HttpPolicy> {
     using T = osmcli_http::HttpPolicy;
     static constexpr auto value =
@@ -1238,6 +1517,87 @@ struct meta<osmcli_http::HttpDeprecatedFeature> {
         object("name", &T::name,
                "doc_url", &T::doc_url,
                "used", &T::used);
+};
+template <>
+struct meta<osmcli_http::HttpNode> {
+    using T = osmcli_http::HttpNode;
+    static constexpr auto value =
+        object("name", &T::name,
+               "type", &T::type,
+               "running", &T::running);
+};
+template <>
+struct meta<osmcli_http::HttpHealth> {
+    using T = osmcli_http::HttpHealth;
+    static constexpr auto value = object("status", &T::status);
+};
+template <>
+struct meta<osmcli_http::HttpStreamConnection> {
+    using T = osmcli_http::HttpStreamConnection;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost);
+};
+template <>
+struct meta<osmcli_http::HttpStreamPublisher> {
+    using T = osmcli_http::HttpStreamPublisher;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost);
+};
+template <>
+struct meta<osmcli_http::HttpStreamConsumer> {
+    using T = osmcli_http::HttpStreamConsumer;
+    static constexpr auto value =
+        object("name", &T::name,
+               "vhost", &T::vhost);
+};
+template <>
+struct meta<osmcli_http::HttpAliveness> {
+    using T = osmcli_http::HttpAliveness;
+    static constexpr auto value =
+        object("vhost", &T::vhost,
+               "status", &T::status);
+};
+template <>
+struct meta<osmcli_http::HttpPlugin> {
+    using T = osmcli_http::HttpPlugin;
+    static constexpr auto value =
+        object("name", &T::name,
+               "version", &T::version,
+               "enabled", &T::enabled);
+};
+template <>
+struct meta<osmcli_http::HttpNodeDetail> {
+    using T = osmcli_http::HttpNodeDetail;
+    static constexpr auto value =
+        object("name", &T::name,
+               "type", &T::type,
+               "running", &T::running,
+               "os_pid", &T::os_pid,
+               "uptime", &T::uptime,
+               "mem_used", &T::mem_used,
+               "mem_limit", &T::mem_limit,
+               "fd_used", &T::fd_used,
+               "fd_total", &T::fd_total,
+               "sockets_used", &T::sockets_used,
+               "sockets_total", &T::sockets_total,
+               "run_queue", &T::run_queue,
+               "disk_free", &T::disk_free,
+               "disk_free_limit", &T::disk_free_limit,
+               "disk_free_alarm", &T::disk_free_alarm,
+               "processes", &T::processes,
+               "processes_used", &T::processes_used,
+               "mem_alarm", &T::mem_alarm,
+               "processors", &T::processors,
+               "proc_used", &T::proc_used,
+               "proc_total", &T::proc_total,
+               "gc_num", &T::gc_num,
+               "gc_bytes_reclaimed", &T::gc_bytes_reclaimed,
+               "io_read_count", &T::io_read_count,
+               "io_read_bytes", &T::io_read_bytes,
+               "io_write_count", &T::io_write_count,
+               "io_write_bytes", &T::io_write_bytes);
 };
 
 template <class T>
@@ -1274,6 +1634,35 @@ struct meta<osmcli_http::HttpAdminSummary> {
                "exchanges", &T::exchanges,
                "queues", &T::queues,
                "bindings", &T::bindings,
+               "connections", &T::connections,
+               "channels", &T::channels,
+               "consumers", &T::consumers,
+               "policies", &T::policies,
+               "operator_policies", &T::operatorPolicies,
+               "feature_flags", &T::featureFlags,
+               "deprecated_features", &T::deprecatedFeatures,
+               "deprecated_features_used", &T::deprecatedFeaturesUsed,
+               "nodes", &T::nodes,
+               "health_alarms", &T::healthAlarms,
+               "health_local_alarms", &T::healthLocalAlarms,
+               "health_virtual_hosts", &T::healthVirtualHosts,
+               "health_ready", &T::healthReady,
+               "stream_connections", &T::streamConnections,
+               "stream_publishers", &T::streamPublishers,
+               "stream_consumers", &T::streamConsumers,
+               "aliveness", &T::aliveness,
+               "plugins", &T::plugins,
+               "node_details", &T::nodeDetails,
+               "node_details_json", &T::nodeDetailsJson,
+               "users", &T::users,
+               "permissions", &T::permissions,
+               "topic_permissions", &T::topicPermissions,
+               "user_limits", &T::userLimits,
+               "vhost_limits", &T::vhostLimits,
+               "parameters", &T::parameters,
+               "global_parameters", &T::globalParameters,
+               "shovels", &T::shovels,
+               "federation_links", &T::federationLinks,
                "overview", &T::overview,
                "skippedExclusive", &T::skippedExclusive,
                "skippedAutoDelete", &T::skippedAutoDelete,
