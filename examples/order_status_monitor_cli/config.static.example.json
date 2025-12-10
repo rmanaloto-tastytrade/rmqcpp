@@ -1,5 +1,5 @@
 {
-  "host": "staging-rabbit-cluster.tastyworks.com",
+  "host": "staging-rabbit-haproxy-vip-01.ar2.tastytrade.systems",
   "port": 5672,
   "vhost": "/",
   "username": "order-status-monitor",
