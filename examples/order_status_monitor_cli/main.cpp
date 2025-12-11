@@ -44,6 +44,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <openssl/err.h>
+#include <bsls_timeinterval.h>
 #include <ball_context.h>
 #include <ball_loggermanager.h>
 #include <ball_loggermanagerconfiguration.h>
@@ -596,16 +597,20 @@ class QuillBallObserver : public ball::Observer {
     {
     }
 
+    void setNoisyCategories(const std::vector<std::string>& prefixes,
+                            int minSeverity)
+    {
+        d_noisyPrefixes = prefixes;
+        d_noisyMinSeverity = minSeverity;
+    }
+
     void publish(const ball::Record& record, const ball::Context& context) override
     {
         if (!d_logger) return;
         const auto& ff = record.fixedFields();
         const std::string_view cat = ff.category();
-        // Per-category thresholds: noisy RMQAMQP/RMQIO below WARN are dropped.
-        static constexpr std::array<std::string_view, 4> noisyPrefixes = {
-            "RMQAMQP.CHANNEL", "RMQAMQP.CONNECTION", "RMQIO.ASIOEVENTLOOP", "RMQIO.EVENTLOOP"};
-        for (auto prefix : noisyPrefixes) {
-            if (cat.rfind(prefix, 0) == 0 && ff.severity() < ball::Severity::e_WARN) {
+        for (const auto& prefix : d_noisyPrefixes) {
+            if (cat.rfind(prefix, 0) == 0 && ff.severity() < d_noisyMinSeverity) {
                 return;
             }
         }
@@ -635,6 +640,9 @@ class QuillBallObserver : public ball::Observer {
 
   private:
     quill::Logger* d_logger;
+    std::vector<std::string> d_noisyPrefixes{
+        "RMQAMQP.CHANNEL", "RMQAMQP.CONNECTION", "RMQIO.ASIOEVENTLOOP", "RMQIO.EVENTLOOP"};
+    int d_noisyMinSeverity{ball::Severity::e_WARN};
 
     static quill::LogLevel mapSeverity(int severity)
     {
@@ -1824,6 +1832,11 @@ int main(int argc, char** argv)
     ball::LoggerManagerScopedGuard ballGuard(ballConfig);
     auto ballObserver =
         bsl::shared_ptr<ball::Observer>(new QuillBallObserver(logger));
+    if (auto qo = bsl::dynamic_pointer_cast<QuillBallObserver>(ballObserver)) {
+        qo->setNoisyCategories(
+            std::vector<std::string>(cfg.ballNoisyPrefixes.begin(), cfg.ballNoisyPrefixes.end()),
+            cfg.ballNoisyMinSeverity);
+    }
     ball::LoggerManager::singleton().registerObserver(ballObserver, "quill");
 
     if (cfg.enableHttpAdmin) {
@@ -2137,6 +2150,25 @@ int main(int argc, char** argv)
             ThreadAttributes(), 1, 1, cfg.threadPoolQueueDepth);
         app.threadPool->start();
         opts.setThreadpool(app.threadPool.get());
+        if (cfg.connectionErrorThresholdMs > 0) {
+            const auto sec = static_cast<int>(cfg.connectionErrorThresholdMs / 1000);
+            const auto nanos = static_cast<int>((cfg.connectionErrorThresholdMs % 1000) * 1000000);
+            opts.setConnectionErrorThreshold(BloombergLP::bsls::TimeInterval(sec, nanos));
+        }
+        if (cfg.shuffleConnectionEndpoints) {
+            opts.setShuffleConnectionEndpoints(true);
+        }
+#ifdef USES_LIBRMQ_EXPERIMENTAL_FEATURES
+        if (cfg.infiniteImmediateRetry) {
+            opts.setTunable("IIR");
+        }
+#else
+        if (cfg.infiniteImmediateRetry) {
+            QUILL_LOG_WARNING(logger,
+                              "infinite_immediate_retry requested but setTunable is unavailable "
+                              "(build without USES_LIBRMQ_EXPERIMENTAL_FEATURES)");
+        }
+#endif
         app.ctx = bsl::make_unique<rmqa::RabbitContext>(opts);
 
         auto endpoint = cfg.endpoint();

@@ -44,6 +44,11 @@ struct JsonConfig {
     bsl::string logPrefix{"order_status_monitor"};
     bsl::string ballMinSeverity{"trace"};
     std::uint32_t threadPoolQueueDepth{200000};
+    std::uint32_t connectionErrorThresholdMs{0};
+    bool shuffleConnectionEndpoints{false};
+    bool infiniteImmediateRetry{false};
+    bsl::vector<bsl::string> ballNoisyPrefixes;
+    int ballNoisyMinSeverity{300};
     bool enableOtel{false};
     bool enableOtelTraces{true};
     bool enableOtelMetrics{true};
@@ -100,6 +105,11 @@ struct glz::meta<osmcli::JsonConfig> {
         "log_prefix", &T::logPrefix,
         "ball_min_severity", &T::ballMinSeverity,
         "thread_pool_queue_depth", &T::threadPoolQueueDepth,
+        "connection_error_threshold_ms", &T::connectionErrorThresholdMs,
+        "shuffle_connection_endpoints", &T::shuffleConnectionEndpoints,
+        "infinite_immediate_retry", &T::infiniteImmediateRetry,
+        "ball_noisy_prefixes", &T::ballNoisyPrefixes,
+        "ball_noisy_min_severity", &T::ballNoisyMinSeverity,
         "enable_otel", &T::enableOtel,
         "enable_otel_traces", &T::enableOtelTraces,
         "enable_otel_metrics", &T::enableOtelMetrics,
@@ -144,6 +154,16 @@ void applyEnvOverrides(ConnectionConfig& cfg)
     if (const char* v = std::getenv("BALL_MIN_SEVERITY")) cfg.ballMinSeverity = v;
     if (const char* v = std::getenv("MQ_THREAD_POOL_QUEUE_DEPTH"))
         cfg.threadPoolQueueDepth = static_cast<std::uint32_t>(std::atoi(v));
+    if (const char* v = std::getenv("MQ_CONN_ERROR_THRESHOLD_MS"))
+        cfg.connectionErrorThresholdMs = static_cast<std::uint32_t>(std::atoi(v));
+    if (const char* v = std::getenv("MQ_SHUFFLE_ENDPOINTS"))
+        cfg.shuffleConnectionEndpoints = std::atoi(v) != 0;
+    if (const char* v = std::getenv("MQ_INFINITE_IMMEDIATE_RETRY"))
+        cfg.infiniteImmediateRetry = std::atoi(v) != 0;
+    if (const char* v = std::getenv("MQ_BALL_NOISY_MIN_SEVERITY"))
+        cfg.ballNoisyMinSeverity = std::atoi(v);
+    if (const char* v = std::getenv("MQ_BALL_NOISY_MIN_SEVERITY"))
+        cfg.ballNoisyMinSeverity = std::atoi(v);
     if (const char* v = std::getenv("OTEL_ENABLE")) cfg.enableOtel = std::atoi(v) != 0;
     if (const char* v = std::getenv("OTEL_TRACES")) cfg.enableOtelTraces = std::atoi(v) != 0;
     if (const char* v = std::getenv("OTEL_METRICS")) cfg.enableOtelMetrics = std::atoi(v) != 0;
@@ -383,6 +403,21 @@ ConnectionConfig loadConfig(int argc, char** argv)
     app.add_option("--thread-pool-queue-depth",
                    cfg.threadPoolQueueDepth,
                    "Thread pool queue depth for single-thread callback dispatcher");
+    app.add_option("--connection-error-threshold-ms",
+                   cfg.connectionErrorThresholdMs,
+                   "Optional connection error threshold; when >0, triggers error callback if no connection after this many ms");
+    app.add_flag("--shuffle-endpoints",
+                 cfg.shuffleConnectionEndpoints,
+                 "Shuffle resolved connection endpoints before connecting");
+    app.add_flag("--infinite-immediate-retry",
+                 cfg.infiniteImmediateRetry,
+                 "Enable rmqcpp IIR tunable (retry forever with immediate attempts)");
+    app.add_option("--ball-noisy-prefix",
+                   cfg.ballNoisyPrefixes,
+                   "BALL categories to suppress below the noisy-min severity (repeatable)");
+    app.add_option("--ball-noisy-min-severity",
+                   cfg.ballNoisyMinSeverity,
+                   "Severity threshold for noisy BALL categories (e.g., 500=TRACE, 400=DEBUG, 300=INFO, 200=WARN)");
     app.add_flag("--enable-otel", cfg.enableOtel, "Enable OpenTelemetry export");
     app.add_flag("--disable-otel-traces", cfg.enableOtelTraces, "Disable OpenTelemetry traces")
         ->default_val(false);

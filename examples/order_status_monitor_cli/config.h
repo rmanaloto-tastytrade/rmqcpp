@@ -33,6 +33,11 @@ struct ConnectionConfig {
     bsl::string logPrefix{"order_status_monitor"};
     bsl::string ballMinSeverity{"trace"};  // BALL->Quill threshold (trace|debug|info|warn|error|fatal)
     std::uint32_t threadPoolQueueDepth{200000};  // callback queue depth for single-thread pool
+    std::uint32_t connectionErrorThresholdMs{0}; // 0 = retry indefinitely before error callback
+    bool shuffleConnectionEndpoints{false};      // shuffle resolver endpoints
+    bool infiniteImmediateRetry{false};          // enable IIR tunable (retry forever without sleep)
+    bsl::vector<bsl::string> ballNoisyPrefixes;
+    int ballNoisyMinSeverity{300}; // default WARN (ball::Severity::e_WARN == 200; INFO==300)
 
     // OpenTelemetry
     bool enableOtel{false};

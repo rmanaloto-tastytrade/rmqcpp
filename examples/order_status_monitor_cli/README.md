@@ -11,6 +11,7 @@ Minimal CLI that consumes order status messages using rmqcpp, logging every deli
 - Logging/health: `ball_min_severity` (json/env `BALL_MIN_SEVERITY`, cli `--ball-min-severity`) sets the minimum BALL level forwarded to Quill (`trace|debug|info|warn|error|fatal`, default `trace`). `thread_pool_queue_depth` tunes the single-thread callback queue (default 200000). A periodic health log reports messages and enqueue failures every 10s.
 - OpenTelemetry (requires opentelemetry-cpp via vcpkg): `enable_otel`, `enable_otel_traces`, `enable_otel_metrics`, `otel_protocol` (`grpc`|`http`), `otel_endpoint` (grpc host:port or http URL), `otel_service_name`, `otel_environment`. When enabled, spans/metrics are exported via OTLP.
 - BALL→Quill logging: use `ball_min_severity` (json/env `BALL_MIN_SEVERITY`, cli `--ball-min-severity`) to set the minimum BALL level forwarded to Quill (`trace|debug|info|warn|error|fatal`, default `trace`).
+- Connection resilience: `heartbeat_ms` (default 60000) for AMQP heartbeats, `connection_timeout_ms` (default 10000), optional `connection_error_threshold_ms` (when >0, triggers the error callback if no connection is established within that window), `shuffle_connection_endpoints` to randomize resolver results, and `infinite_immediate_retry` to enable rmqcpp’s IIR tunable (retry forever without sleeping). Noisy BALL categories can be filtered with `ball_noisy_prefixes` and `ball_noisy_min_severity` (default prefixes: RMQAMQP.CHANNEL/CONNECTION, RMQIO.ASIOEVENTLOOP/EVENTLOOP; default min severity INFO/WARN).
 
 Default topic binding: `accounts.*.orders.*.*` if none provided.
 
@@ -102,6 +103,22 @@ If Python 3 is available, CMake adds a helper target to diff the latest CLI-emit
 cmake --build <build-dir> --target order_status_monitor_cli_diff
 ```
 It reads `config.local.json` for HTTP admin host/user/password (or override with CLI flags inside `tools/compare_overview.py`) and writes `curl_overview-*.json` plus `overview_diff-*.txt` into `<build-dir>/examples/order_status_monitor_cli/logs/`.
+
+### Env/JSON/CLI precedence
+Defaults → JSON (`--config`) → environment overrides (e.g., `MQ_*`) → CLI flags. In Nomad, Vault/Consul templates populate `MQ_*` and binding env vars; local JSON/CLI can override for testing.
+
+### Nomad-style static run
+Use a static config (HTTP admin off) with env-provided queue/bindings. For example:
+```
+./rmq_order_status_monitor_cli --config ./examples/order_status_monitor_cli/config.local.static.json
+```
+Ensure `MQ_PASSWORD` (and other secrets) are set in the environment or config before running. The sample static config mirrors the staging Nomad env.
+
+### Reconnect sanity check
+To validate reconnect/rebind behavior, you can force-close the AMQP connection via the management API and watch the logs:
+1. Start the CLI with a short run: `--run-seconds 60` and your config.
+2. In another shell, find the connection name via `/api/connections` and `DELETE /api/connections/{name}` (Basic auth).
+3. The CLI should log a disconnect, retry according to the backoff settings, reconnect, and rebind the consumer.
 
 ## RabbitMQ HTTP API crawl (dynamic topology)
 
