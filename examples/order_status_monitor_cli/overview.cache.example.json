@@ -1,0 +1,12 @@
+{
+  "cluster_name": "tastyworks-staging",
+  "rabbitmq_version": "3.12.14",
+  "erlang_version": "26.2.5.5",
+  "object_totals": {
+    "consumers": 733,
+    "exchanges": 27,
+    "queues": 691,
+    "connections": 335,
+    "channels": 555
+  }
+}

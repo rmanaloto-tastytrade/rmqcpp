@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CMakePythonSetting">
+    <option name="pythonIntegrationState" value="YES" />
+  </component>
+  <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
+  <component name="ProjectUserFactors">
+    <factor id="completionFinishedType">
+      <dailyData date="18-03-2025">
+        <observation name="cancelled" value="3.0" />
+      </dailyData>
+    </factor>
+    <factor id="completionType">
+      <dailyData date="18-03-2025">
+        <observation name="BASIC" value="1.0" />
+      </dailyData>
+    </factor>
+    <factor id="completionUsage">
+      <dailyData date="18-03-2025">
+        <observation name="count" value="3.0" />
+      </dailyData>
+    </factor>
+    <factor id="fullLineFactors" />
+    <factor id="itemPosition" />
+    <factor id="mnemonicsUsage" />
+    <factor id="prefixLength" />
+    <factor id="prefixMatchingType" />
+    <factor id="templatesUsage" />
+    <factor id="timeBetweenTyping" />
+  </component>
+</project>

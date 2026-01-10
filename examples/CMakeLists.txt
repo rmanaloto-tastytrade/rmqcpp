@@ -5,3 +5,6 @@ if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "SunPro") AND NOT (CMAKE_CXX_COMPILER_ID 
     add_subdirectory(helloworld)
     add_subdirectory(topology)
 endif()
+
+# Order status monitor CLI (rmqcpp-based)
+add_subdirectory(order_status_monitor_cli)

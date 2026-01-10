@@ -1,0 +1,193 @@
+Detecting compiler hash for triplet arm64-osx...
+Compiler found: /usr/bin/c++
+The following packages are already installed:
+    bde:arm64-osx@4.18.0.0
+  * boost-algorithm:arm64-osx@1.89.0
+  * boost-align:arm64-osx@1.89.0
+  * boost-array:arm64-osx@1.89.0
+    boost-asio[core,deadline-timer,spawn]:arm64-osx@1.89.0
+  * boost-assert:arm64-osx@1.89.0
+    boost-beast:arm64-osx@1.89.0
+  * boost-bind:arm64-osx@1.89.0
+  * boost-cmake:arm64-osx@1.89.0
+  * boost-concept-check:arm64-osx@1.89.0
+  * boost-config:arm64-osx@1.89.0
+  * boost-container:arm64-osx@1.89.0
+  * boost-container-hash:arm64-osx@1.89.0
+  * boost-context:arm64-osx@1.89.0
+  * boost-conversion:arm64-osx@1.89.0
+  * boost-core:arm64-osx@1.89.0
+  * boost-date-time:arm64-osx@1.89.0
+  * boost-describe:arm64-osx@1.89.0
+  * boost-detail:arm64-osx@1.89.0
+  * boost-endian:arm64-osx@1.89.0
+  * boost-exception:arm64-osx@1.89.0
+  * boost-function:arm64-osx@1.89.0
+  * boost-function-types:arm64-osx@1.89.0
+  * boost-functional:arm64-osx@1.89.0
+  * boost-fusion:arm64-osx@1.89.0
+  * boost-headers:arm64-osx@1.89.0
+  * boost-integer:arm64-osx@1.89.0
+  * boost-intrusive:arm64-osx@1.89.0
+  * boost-io:arm64-osx@1.89.0
+  * boost-iterator:arm64-osx@1.89.0
+  * boost-lexical-cast:arm64-osx@1.89.0
+  * boost-logic:arm64-osx@1.89.0
+  * boost-move:arm64-osx@1.89.0
+  * boost-mp11:arm64-osx@1.89.0
+  * boost-mpl:arm64-osx@1.89.0
+  * boost-numeric-conversion:arm64-osx@1.89.0
+  * boost-optional:arm64-osx@1.89.0
+  * boost-pool:arm64-osx@1.89.0
+  * boost-predef:arm64-osx@1.89.0
+  * boost-preprocessor:arm64-osx@1.89.0
+  * boost-range:arm64-osx@1.89.0
+  * boost-regex:arm64-osx@1.89.0
+  * boost-smart-ptr:arm64-osx@1.89.0
+  * boost-static-assert:arm64-osx@1.89.0
+  * boost-static-string:arm64-osx@1.89.0
+  * boost-system:arm64-osx@1.89.0
+  * boost-throw-exception:arm64-osx@1.89.0
+  * boost-tokenizer:arm64-osx@1.89.0
+  * boost-tuple:arm64-osx@1.89.0
+  * boost-type-index:arm64-osx@1.89.0
+  * boost-type-traits:arm64-osx@1.89.0
+  * boost-typeof:arm64-osx@1.89.0
+  * boost-uninstall:arm64-osx@1.89.0
+  * boost-unordered:arm64-osx@1.89.0
+  * boost-utility:arm64-osx@1.89.0
+  * boost-variant2:arm64-osx@1.89.0
+  * boost-winapi:arm64-osx@1.89.0
+    cli11:arm64-osx@2.6.1
+    glaze:arm64-osx@6.1.0
+    gtest:arm64-osx@1.17.0#2
+    openssl:arm64-osx@3.6.0#3
+    quill:arm64-osx@11.0.1
+  * vcpkg-boost:arm64-osx@2025-03-29
+  * vcpkg-cmake:arm64-osx@2024-04-23
+  * vcpkg-cmake-config:arm64-osx@2024-05-23
+  * vcpkg-cmake-get-vars:arm64-osx@2025-05-29
+    zstd:arm64-osx@1.5.7
+bde provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(bal CONFIG REQUIRED)
+  # note: 7 additional targets are not displayed.
+  target_link_libraries(main PRIVATE bal balb-iface ball-iface balm-iface)
+
+  find_package(bdl CONFIG REQUIRED)
+  # note: 16 additional targets are not displayed.
+  target_link_libraries(main PRIVATE bdl bdlb-iface bdlc-iface bdld-iface)
+
+  find_package(bsl CONFIG REQUIRED)
+  # note: 13 additional targets are not displayed.
+  target_link_libraries(main PRIVATE bsl bsla-iface bslh-iface bsls-iface)
+
+  find_package(inteldfp CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE inteldfp)
+
+  find_package(pcre2 CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE pcre2)
+
+  find_package(ryu CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE ryu)
+
+  find_package(s_baltst CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE s_baltst)
+
+bde provides pkg-config modules:
+
+  # bal 
+  bal
+
+  # bbl 
+  bbl
+
+  # bdl 
+  bdl
+
+  # bsl 
+  bsl
+
+  # inteldfp 
+  inteldfp
+
+  # pcre2 
+  pcre2
+
+  # ryu 
+  ryu
+
+  # s_baltst 
+  s-baltst
+
+boost-asio provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(boost_asio CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Boost::asio)
+
+  find_package(boost_asio_core CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Boost::asio_core)
+
+  find_package(boost_asio_deadline_timer CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Boost::asio_deadline_timer)
+
+  find_package(boost_asio_spawn CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Boost::asio_spawn)
+
+boost-beast provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(boost_beast CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Boost::beast)
+
+cli11 provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(CLI11 CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE CLI11::CLI11)
+
+cli11 provides pkg-config modules:
+
+  # C++ command line parser
+  CLI11
+
+glaze provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(glaze CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE glaze::glaze)
+
+The package gtest is compatible with built-in CMake targets:
+
+    enable_testing()
+    
+    find_package(GTest CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main)
+    
+    add_test(AllTestsInMain main)
+
+openssl is compatible with built-in CMake targets:
+
+  find_package(OpenSSL REQUIRED)
+  target_link_libraries(main PRIVATE OpenSSL::SSL)
+  target_link_libraries(main PRIVATE OpenSSL::Crypto)
+
+quill provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(quill CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE quill::quill)
+
+quill provides pkg-config modules:
+
+  # Low Latency C++ Logging Library
+  quill
+
+zstd provides CMake targets:
+
+  find_package(zstd CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE zstd::libzstd)
+
+All requested installations completed successfully in: 526 us
